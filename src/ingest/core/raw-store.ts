@@ -31,10 +31,9 @@ export class BookPaths {
   get bookFile(): string { return join(this.root, "book.yaml"); }
   get chaptersDir(): string { return join(this.root, "chapters"); }
   get reportFile(): string { return join(this.root, "ingest-report.md"); }
-  /** Gitignored: HTML cache, catalog, browser profile, lock. */
+  /** Gitignored: HTML cache (gồm cả mục lục), browser profile, lock. */
   get cacheDir(): string { return join(this.root, ".cache"); }
   get htmlCacheDir(): string { return join(this.cacheDir, "html"); }
-  get catalogFile(): string { return join(this.cacheDir, "catalog.json"); }
   get browserProfileDir(): string { return join(this.cacheDir, "browser-profile"); }
   get lockFile(): string { return join(this.cacheDir, "ingest.lock"); }
 
