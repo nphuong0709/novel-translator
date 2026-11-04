@@ -1,6 +1,6 @@
 # Novel Translator — Blueprint V4
 
-> **Trạng thái:** Slice 1 xong (tag `slice-1`). Đang chuẩn bị Slice 2 với kiến trúc 3 subagent (D-04, D-05, D-13, D-14 sửa/thêm ngày 2026-11-04).
+> **Trạng thái:** Slice 1 xong (tag `slice-1`). B1 xong (`docs/capability-verification.md`). Đang chuẩn bị Slice 2 với kiến trúc 3 subagent (D-04, D-05, D-12, D-13, D-14, D-15 sửa/thêm ngày 2026-11-04).
 > **Thay cho:** Blueprint V3 (bản review). Các mục không nhắc lại ở đây giữ nguyên tinh thần V3.
 > **Phạm vi:** công cụ cá nhân, chạy local bằng Claude Code; nguồn EN/ZH → tiếng Việt → EPUB.
 
@@ -21,9 +21,10 @@
 | D-09 | Nguồn EN/ZH (Giản thể và Phồn thể), đích là tiếng Việt | Nhật/Hàn để V2 |
 | D-10 | Tách 2 repo: framework và dữ liệu truyện | Text truyện không nằm chung repo với code |
 | D-11 | *(sửa 2026-11-04)* Repo dữ liệu **chỉ ở local**; backup bằng `novel snapshot` ra **Google Drive** (qua Google Drive for desktop): `git bundle` đủ lịch sử ở mốc `raw` và `final`, và sau mỗi batch dịch (giữ N bản mới nhất); kèm zip raw và `.epub`. **Không mã hóa.** | Không phải quản lý khóa GPG; EPUB đọc được ngay trên Drive. Đánh đổi chấp nhận: Google đọc được nội dung. *Bản cũ: remote GitHub qua `git-remote-gcrypt`.* |
-| D-12 | Mỗi chương 4 commit: `raw`, `translate`, `review`, `fix`/`approve` | Giữ được kiểm vết mà không phải tới 16 commit một chương |
+| D-12 | *(sửa 2026-11-04)* **Commit mỗi vòng**, theo nhóm 2–3 chương: `raw` → `translate` → `review(r1)` → `fix(r1)` → `review(r2)` → `fix(r2)` → `approve` (kèm kết quả R1-delta). Review luôn được commit trước bản sửa (D-06) | Kiểm vết từng vòng của phương án D; commit theo nhóm để số commit không nhân theo chương. *Bản cũ: 4 commit mỗi chương.* |
 | D-13 | *(sửa 2026-11-04)* `consistency-critic` **Batch Mode** ở ranh giới nhóm đầu tiên khi đã duyệt ≥ 10 chương kể từ batch trước; **Final Mode** chỉ kiểm tra xuyên batch | Chapter-critic đã đọc từng chương; hai mode chỉ khác phạm vi dữ liệu. *Bản cũ: batch-critic và final-critic là 2 agent.* |
 | D-14 | *(mới 2026-11-04)* **Model theo profile của truyện** (`book.yaml` → `translation.profile: epic \| standard`, có thể ghi đè từng lượt). Code điều phối truyền `model` + `effort` cho từng lần gọi; không để LLM tự chọn. Chỉ dùng Opus 5.5 / Sonnet 5.5 (không Fable, không Haiku) | Truyện cổ đại/huyền huyễn/bối cảnh lớn cần Opus effort cao; truyện hiện đại có thể hạ effort. Chốt bằng số liệu golden set (mục 7.3) |
+| D-15 | *(mới 2026-11-04, từ B1)* **Ràng buộc runtime đã kiểm chứng**: chặn subagent lồng nhau; mọi agent có `tools:` allowlist; bước phụ thuộc chạy foreground; logger hook ghi model/effort/usage thật; `validate` kiểm cấu hình thực tế trước khi duyệt (mục 7.5). Không thêm subagent, database hay framework | B1 (`docs/capability-verification.md`): subagent lồng nhau mặc định **được phép**; subagent mặc định **chạy nền**; `--allowedTools` không giới hạn tool; `SubagentStop` không có model |
 
 ## 2. Nguyên tắc truy cập nguồn (thay nguyên tắc 11 của V3)
 
@@ -44,7 +45,9 @@
 │   ├── src/ingest/adapters/     shuba69.ts, shuku52.ts, local-file.ts
 │   ├── src/validate/            gate tất định (Slice 2)
 │   ├── src/cli.ts               ingest | import | validate | status | export
-│   ├── .claude/agents/          (Slice 2) translator, chapter-critic; (Slice 4) consistency-critic
+│   ├── .claude/agents/          (Slice 2) translator, chapter-critic; (Slice 4) consistency-critic — mỗi agent có `tools:` allowlist, không agent nào có `Agent`
+│   ├── .claude/settings.json    (Slice 2) env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`; hook SubagentStop + PostToolUse(Agent) → logger
+│   ├── .claude/hooks/agent-log.mjs  (Slice 2) logger nhỏ: chỉ metadata, không chép nội dung truyện
 │   ├── .claude/skills/          (Slice 2+) ingest, translate-batch, review-batch, finalize, status
 │   ├── rules/                   (Slice 2) port từ translation_skills/*.md của bản V1
 │   └── tests/fixtures + golden  HTML tổng hợp, KHÔNG chứa text truyện thật
@@ -68,17 +71,18 @@ Không bao giờ commit: `.env`, `browser-profile/`, `token.json`, `credentials.
           → trạng thái mỗi chương VALID | SUSPECT | BLOCKED | FAILED → ingest-report.md → commit raw(...)
           → đủ raw: `novel snapshot --stage raw` (tag raw-done, bundle + zip lên Drive)
 
-/translate-batch (theo nhóm 2–3 chương; mỗi dòng "agent" là MỘT lần gọi subagent độc lập):
+/translate-batch <range> <profile?> (theo nhóm 2–3 chương; mỗi dòng "agent" là MỘT lần gọi subagent độc lập,
+                  luôn FOREGROUND `run_in_background: false`, truyền `model` + `effort` theo profile):
   translator (dịch)                 → draft_v1.md + summary.md (+ context-delta đề xuất) → commit translate(chNNN-MMM)
-  chapter-critic R1 (trọn chương)   → review_r1.md: nghĩa, nhân vật, context, xưng hô     → commit review(...)
-    validate: kiểm bằng chứng (excerpt nguyên văn có thật) → apply-fixes (code, khớp chính xác)
+  chapter-critic R1 (trọn chương)   → review_r1.md: nghĩa, nhân vật, context, xưng hô     → commit review(r1)
+    validate: kiểm runtime (7.5) + bằng chứng (excerpt nguyên văn có thật) → apply-fixes (code, khớp chính xác)
     translator (sửa: chỉ issue còn lại, chỉ đoạn liên quan ±1)                            → draft_v2.md
-    validate: chỉ đoạn có issue được đổi; giới hạn mức thay đổi
-  chapter-critic R2 (trọn chương + các thay đổi sau R1) → review_r2.md: tự nhiên, dịch máy, chất văn → commit review(...)
-    apply-fixes → translator (phần còn lại) → draft_v3.md → validate (như trên)
+    validate: chỉ đoạn có issue được đổi; giới hạn mức thay đổi                             → commit fix(r1)
+  chapter-critic R2 (trọn chương + các thay đổi sau R1) → review_r2.md: tự nhiên, dịch máy, chất văn → commit review(r2)
+    apply-fixes → translator (phần còn lại) → draft_v3.md → validate (như trên)            → commit fix(r2)
   chapter-critic R1-delta (chỉ đoạn đã đổi sau R2)       → regression.md: hồi quy nghĩa
-  validate cuối: độ phủ đoạn, chữ Hán sót, glossary, hash
-                       → approve | rework (≤2 lần) | NEEDS_HUMAN_REVIEW   → commit fix/approve(...)
+  validate cuối: kiểm runtime (7.5), độ phủ đoạn, chữ Hán sót, glossary, hash
+                       → approve | rework (≤2 lần) | NEEDS_HUMAN_REVIEW   → commit approve(...)
   ranh giới nhóm, đã duyệt ≥ 10 chương: consistency-critic Batch → sửa → R1-delta → commit
   sau mỗi batch: `novel snapshot --stage batch` (bundle lên Drive, giữ N bản mới nhất)
 
@@ -173,6 +177,7 @@ interface SourceAdapter {
 
 - KZGD 2–3 chương, cài sẵn 10 lỗi. Chạy `epic` trước; chạy thêm `standard` trên cùng chương để đo mức chênh.
 - Đo: lỗi cài sẵn bắt được (≥ 8/10), issue báo sai, usage mỗi chương, thời gian mỗi nhóm; so nhóm 2 và nhóm 3 chương.
+- Usage lấy từ logger (7.5) và `modelUsage` của phiên: đây là **ước tính theo giá niêm yết**; mức tiêu hao gói thật xem `/usage`. Đo thêm chi phí cố định của phiên điều phối khi **tắt MCP connector không dùng** (B1: ~30k token mỗi lượt main, 97% chi phí PoC).
 - `standard` chỉ dùng cho truyện hiện đại khi không tụt quá ngưỡng trên. Kiểm lại `epic` trên một truyện cổ đại/huyền huyễn khi có.
 
 ### 7.4 Context có version
@@ -180,6 +185,20 @@ interface SourceAdapter {
 - Translator chỉ **đề xuất** context-delta; mỗi mục kèm trích dẫn nguyên văn (chương + câu) và chương bắt đầu hiệu lực. Không suy diễn: mục không có trích dẫn bị loại.
 - Code kiểm trích dẫn có thật trong `source.md` rồi mới tăng version. Consistency-critic duyệt các context-delta ở Batch Mode.
 - Frontmatter mỗi bản nháp/review ghi hash version context đã dùng; context đổi thì artifact phía sau tự không hợp lệ (D-07). Chi tiết ở Slice 3.
+
+### 7.5 Ràng buộc runtime (D-15, kiểm chứng ở B1)
+
+Bằng chứng: `docs/capability-verification.md` (Claude Code 2.1.317).
+
+| # | Ràng buộc | Cách làm | Căn cứ B1 |
+|---|---|---|---|
+| 1 | **Chặn subagent lồng nhau** | Hai lớp: không agent nào có `Agent` trong `tools:`; `.claude/settings.json` của repo đặt `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1"`. Điều phối chỉ ở skill / phiên main | Q4: mặc định cho phép tới 3 tầng (đã quan sát `spawnDepth: 2`) |
+| 2 | **Giới hạn tool** | Mọi agent có `tools:` allowlist. `chapter-critic`, `consistency-critic`: `Read, Grep, Glob`. `translator`: `Read, Grep, Glob, Write` (chỉ ghi file nháp/summary/context-delta; `validate` kiểm path). `advisor` do harness tự thêm, chấp nhận vì không ghi được file | Q3: allowlist có hiệu lực ở request; `--allowedTools` **không** giới hạn tool, main có Bash + MCP |
+| 3 | **Foreground cho bước phụ thuộc** | Skill bắt buộc truyền `run_in_background: false` cho mọi lượt trong một nhóm (dịch → R1 → sửa → R2 → sửa → R1-delta). Thứ tự được kiểm lại bằng log (mục 4) | Q7: subagent mặc định chạy nền; foreground đã quan sát được khi truyền rõ |
+| 4 | **Logger nhỏ** | Hook `SubagentStop` + `PostToolUse(matcher: Agent)` → `.claude/hooks/agent-log.mjs` ghi JSONL: `agent_id, agent_type, resolvedModel, effort, usage, totalTokens, durationMs, start/stop time`. **Chỉ metadata**, không ghi `last_assistant_message` hay prompt. Ghép 2 event theo `agent_id`; usage nhiều lượt cộng từ `agent_transcript_path`. Frontmatter review lấy model/effort/usage **từ log**, không từ lời tự khai của agent | Q5: `SubagentStop` có `effort` nhưng không có model/usage; `PostToolUse(Agent)` có `resolvedModel`, `usage` (request cuối) |
+| 5 | **Validator kiểm cấu hình thực tế trước khi duyệt** | `validate` từ chối khi: (a) model/effort trong log ≠ profile của lượt đó; (b) file agent có tool ngoài allowlist hoặc có `Agent`; (c) thiếu env chặn lồng; (d) các lượt trong nhóm chồng thời gian (không tuần tự); (e) review không có bản ghi log tương ứng | Q1, Q2: ghi đè model/effort chỉ được LLM điều phối truyền, nên phải kiểm lại bằng code |
+
+Ngoài phạm vi: không thêm subagent, database, framework hay dependency mới. Logger dùng Node có sẵn; validator nằm trong `src/validate/`.
 
 ## 8. Chuyển kiến thức từ bản Python sang TS
 
@@ -196,14 +215,15 @@ Golden mô tả **hành vi mong muốn**, không phải chi tiết hiện thực
 | Slice | Nội dung | Xong khi |
 |---|---|---|
 | **1** | Ingest TS: core + shuku52 + shuba69 + local-file, CLI `ingest`/`import`, repo dữ liệu đầu tiên | Golden test xanh; cào lại KZGD 1–201 khớp hash với bản Python đã sửa (hoặc lệch có giải thích); lock, cache, resume chạy đúng |
-| 2 | 1 nhóm chương: `translator` + `chapter-critic` (R1, R2, R1-delta) theo phương án D + `validate` + golden set lỗi cài sẵn; profile `epic` và `standard` | Bắt được ≥ 8/10 lỗi cài sẵn; `validate` chặn issue không có bằng chứng và sửa ngoài phạm vi; commit đúng 4 bước; gate chặn được review cũ (stale); có số liệu usage cho 2 profile |
+| 2 | 1 nhóm chương: `translator` + `chapter-critic` (R1, R2, R1-delta) theo phương án D + `validate` + golden set lỗi cài sẵn; profile `epic` và `standard` | Bắt được ≥ 8/10 lỗi cài sẵn; `validate` chặn issue không có bằng chứng và sửa ngoài phạm vi; `validate` chặn được review có model/effort sai profile, agent có tool ngoài allowlist, lượt chạy chồng thời gian (7.5); commit đúng từng vòng (D-12); gate chặn được review cũ (stale); có số liệu usage cho 2 profile |
 | 3 | Context có version (mục 7.4), 5–10 chương, resume giữa chừng | Xưng hô và tiêu đề đổi theo phạm vi chương mà không sửa lan sang chương cũ; context-delta không có trích dẫn bị loại |
 | 4 | `consistency-critic` Batch Mode | Phát hiện tên hoặc tiêu đề không nhất quán đã cài sẵn; sửa xong thì R1-delta duyệt lại |
 | 5 | `consistency-critic` Final Mode + EPUB | Bị chặn khi còn chương chưa duyệt; epubcheck pass; manifest trỏ đúng commit |
 
 ## 10. Việc mở và rủi ro còn lại
 
-- **Cần xác minh trong docs Claude Code (B1):** subagent có gọi được subagent khác không (giả định là không, nên điều phối ở phiên chính); payload của hook `SubagentStop` dùng để log agent thật; cách skill nhận tham số; **ghi đè `model` cho từng lần gọi** (D-14 cần; tool gọi subagent có tham số `model` nhưng phải xác nhận thứ tự ưu tiên với frontmatter); **đặt `effort` cho từng agent / từng lần gọi**; agent frontmatter giới hạn tool (critic không có Write/Edit).
+- **B1 đã xong** (`docs/capability-verification.md`): model/effort theo lần gọi, critic chỉ đọc, subagent lồng nhau, `SubagentStop`, tham số skill, usage đều VERIFIED trong `-p`; kết luận đưa vào D-15 / mục 7.5. **Còn chưa thử:** hành vi trong phiên tương tác VS Code (subagent mặc định chạy nền), biến `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, trường hợp không truyền `run_in_background`, tắt MCP connector. Kiểm ở đầu Slice 2 khi dựng skill thật.
+- **Phụ thuộc vào trường không có trong tài liệu:** `SubagentStop.effort`, `subagents/*.meta.json` có thể đổi giữa các phiên bản Claude Code. Logger phải chịu được trường thiếu (ghi `null`), và `validate` báo rõ thay vì duyệt im lặng.
 - **Công cụ cần cài:** Google Drive for desktop (backup), `pandoc` + `epubcheck` (Slice 5). `gpg`/`git-remote-gcrypt` không còn cần sau khi sửa D-11.
 - **Backup chỉ tốt bằng lần snapshot gần nhất:** quên chạy `snapshot --stage batch` thì công dịch từ lần trước chỉ có ở local. Nội dung trên Drive không mã hóa.
 - Truyện dài 200+ chương có thể chạm usage limit; đo ở Slice 2 trước khi chạy cả bộ.
