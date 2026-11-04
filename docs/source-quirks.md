@@ -62,3 +62,19 @@ Nguồn gốc: các sự cố thật trong khi cào HYWYW (69shuba) và KZGD (52
 - **SHUKU-05:** tiêu đề kết thúc bằng `”`, `？`, `！` (ví dụ `第5章 “谁？”`) sẽ **không** được nhận là tiêu đề, và chương đó sẽ `FAILED`. Golden đang ghi nhận hành vi này (`null`). Nếu gặp ở site thật, sửa cả quy tắc lẫn golden.
 - AO3, NovelLunar, FreeWebNovel chưa được port (V2).
 - Raw KZGD do V1 cào **trước** khi sửa SHUKU-05 có thể có chương bị cắt sai nếu thân bài có câu dạng `第N章里…`. Khi so sánh chéo (blueprint mục 8.5), lệch ở những chương này là bình thường.
+
+## Khác biệt có chủ đích so với V1 (bản TS)
+
+Golden vẫn khớp hoàn toàn. Những điểm dưới đây nằm ngoài phạm vi golden, nên khi so hash chéo trên dữ liệu thật thì cần nhớ:
+
+| Điểm | V1 | TS | Lý do |
+|---|---|---|---|
+| Comment HTML trong `.txtnav` | bs4 coi comment là string, nên có thể lấy vào nội dung | bỏ | Comment không phải nội dung. Nếu crosscheck lệch ở 69shuba, xem chỗ này trước |
+| Cache | Cache đoạn đã parse (52shuku) và `catalog.json` (69shuba) | Cache **HTML gốc** theo URL cho mọi trang, kể cả mục lục | CORE-12: sửa parser thì parse lại offline. SHUBA-09/SHUKU-10 dựa trên cache này |
+| Bỏ qua chương đã có (CORE-13) | Có file raw ≥ 200 ký tự | Thêm điều kiện: thân bài nguyên vẹn (`output_sha256`) **và** cùng parser fingerprint (phiên bản parser + hash mẫu rác + `numbering`) | Sửa parser hoặc `junkPatterns` thì raw cũ tự được làm lại |
+| User-Agent (HTTP) | Giả Chrome | `novel-translator/0.1 (...)` | Nguyên tắc không giả fingerprint |
+| Chrome | Bỏ `--no-sandbox` | `chromiumSandbox: true` | Cùng hiệu quả, dùng tùy chọn chính thức |
+| 52shuku: chương vượt chương cuối | Lỗi luôn (mục lục cache vĩnh viễn) | Tải lại mục lục và trang cuối cũ **một lần** mỗi lần chạy rồi mới báo lỗi | Truyện đang ra chương mới |
+| CORE-09 tỷ lệ trích xuất | Không có | Có cho cả 2 adapter (`metadata.extraction`) | Bắt lỗi HTML làm mất đoạn mà không báo |
+| CORE-08 | Chỉ cảnh báo chương ngắn | Ngắn (< 0,5×) **và** dài (> 2×) | Chương bị gộp (KZGD 63) |
+| Rác còn sót | Không kiểm | URL, tên miền, `最新章节`… thì `SUSPECT` (không xóa) | Phát hiện mẫu rác mới mà không xóa nhầm câu truyện |

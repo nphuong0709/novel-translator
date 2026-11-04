@@ -22,4 +22,10 @@ npm run novel -- <lệnh>   # CLI qua tsx
 ```
 
 ## Trạng thái
-Slice 1 (ingest) đang dựng: stub trong `src/ingest/**` ném `TODO(<quirk-id>)`. Port theo thứ tự: numerals → junk → shuba69 parse → shuku52 parse/ghép trang → retry/lock/cache → CLI.
+Slice 1 (ingest): code xong, golden + spec xanh. Còn lại để đóng Slice 1: chạy thật trên KZGD 1–201 rồi `novel crosscheck` với raw V1; tạo repo dữ liệu đầu tiên (gcrypt, người dùng tự làm).
+
+Bản đồ code:
+- `src/ingest/adapters/`: `shuba69` (Chrome thật), `shuku52` (HTTP, ghép trang), `local-file` (import).
+- `src/ingest/core/`: numerals, junk, html, checks, challenge, retry, lock, fs-atomic, html-cache, http, browser, raw-store.
+- `src/ingest/run.ts` (orchestrator), `src/ingest/factory.ts` (ráp fetcher: cache → polite → network), `src/config.ts` (book.yaml), `src/cli.ts`.
+- Khác biệt có chủ đích so với V1: xem cuối `docs/source-quirks.md`.
