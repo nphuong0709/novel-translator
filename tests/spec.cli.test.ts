@@ -81,7 +81,7 @@ describe("factory + runIngest (52shuku, mạng giả = fixture)", () => {
     const firstNetwork = network;
     expect(firstNetwork).toBe(6); // index + 5 trang
 
-    await rm(paths.chaptersDir, { recursive: true });
+    await rm(paths.rawDir, { recursive: true });
     const r2 = buildAdapter(config, paths, { network: fake, log: () => {} });
     await runIngest({ adapter: r2.adapter, store: new RawStore(paths), bookUrl: config.url, from: 1, to: 4, log: () => {} });
     expect(network).toBe(firstNetwork);
@@ -132,9 +132,12 @@ describe("CLI", () => {
       await writeFile(join(v1, `${n}.txt`), `第${n}章 标题\n\n${content}\n`);
       await writeFile(join(v1, `${n}.meta.json`), JSON.stringify({ url: `https://x/${n}`, content_hash: contentHash(content) }));
     }
-    expect(await main(["import", dir, "--dir", v1])).toBe(0);
+    expect(await main(["import", dir, "--dir", v1, "--from", "1", "--to", "3"])).toBe(0);
     const s = await new RawStore(new BookPaths(dir)).load(2);
     expect(s?.frontmatter).toMatchObject({ adapter: "local-file", url: "https://x/2", title: "第2章 标题" });
+    const manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8"));
+    expect(manifest).toMatchObject({ book_id: "demo", chapter_count: 3, counts: { VALID: 3 } });
+    expect(await readFile(join(dir, "raw", "chapter-0003.md"), "utf8")).toContain("# 第3章 标题");
 
     stdout = [];
     await main(["status", dir, "--from", "1", "--to", "5"]);

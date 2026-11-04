@@ -80,12 +80,13 @@ describe("RawStore", () => {
     return { paths, store: new RawStore(paths) };
   };
 
-  it("ghi chapters/NNN/source.md, đọc lại đúng tiêu đề + đoạn + frontmatter", async () => {
+  it("ghi raw/chapter-NNNN.md, đọc lại đúng tiêu đề + đoạn + frontmatter", async () => {
     const { paths, store } = await setup();
     const c = chapter(7, ["甲。", "乙。"], { metadata: { pages: [3, 4] } });
     const check = checkChapter(c, new Map());
     await store.save(c, { adapter: "t", parser: "t@1+junk:0", check });
-    expect(paths.sourceFile(7)).toMatch(/chapters\/007\/source\.md$/);
+    expect(paths.sourceFile(7)).toMatch(/raw\/chapter-0007\.md$/);
+    expect(paths.reportFile).toMatch(/reviews\/ingestion\.md$/);
     const text = await readFile(paths.sourceFile(7), "utf8");
     expect(text).toMatch(/^---\nstage: source\nchapter: 7\n/);
     expect(text.endsWith("---\n# 第7章 标题\n\n甲。\n\n乙。\n")).toBe(true);
@@ -108,6 +109,29 @@ describe("RawStore", () => {
     const file = paths.sourceFile(1);
     await writeFile(file, `${await readFile(file, "utf8")}sửa tay\n`);
     expect(await store.isUpToDate(1, "t@1+junk:aa")).toBe(false);
+  });
+
+  it("listChapters chỉ nhận chapter-NNNN.md; manifest tổng hợp từ raw, chương sửa tay là MODIFIED", async () => {
+    const { paths, store } = await setup();
+    for (const n of [2, 10, 1]) {
+      const c = chapter(n);
+      await store.save(c, { adapter: "t", parser: "t@1+junk:0", check: checkChapter(c, new Map()) });
+    }
+    await writeFile(join(paths.rawDir, "notes.md"), "không phải chương\n");
+    expect(await store.listChapters()).toEqual([1, 2, 10]);
+
+    await writeFile(paths.sourceFile(2), `${await readFile(paths.sourceFile(2), "utf8")}sửa tay\n`);
+    const m = await store.writeManifest({ bookId: "demo", sourceLanguage: "zh", sourceUrl: "https://x/", adapter: "t" });
+    expect(m.chapter_count).toBe(3);
+    expect(m.chapters.map((c) => [c.id, c.status, c.file])).toEqual([
+      ["0001", "VALID", "raw/chapter-0001.md"],
+      ["0002", "MODIFIED", "raw/chapter-0002.md"],
+      ["0010", "VALID", "raw/chapter-0010.md"],
+    ]);
+    expect(m.counts).toEqual({ VALID: 2, MODIFIED: 1 });
+    const onDisk = JSON.parse(await readFile(paths.manifestFile, "utf8"));
+    expect(onDisk.book_id).toBe("demo");
+    expect(onDisk.chapters[0].content_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 

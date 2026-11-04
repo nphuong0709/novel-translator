@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * CLI Slice 1. Mọi lệnh nhận thư mục repo dữ liệu truyện (`../novel-books/<book-id>`).
+ * CLI. Mọi lệnh nhận thư mục truyện (`books/<book-id>`). Layout: `rules/artifact-contract.md`
+ * (raw/chapter-NNNN.md, manifest.json, reviews/ingestion.md). Được gọi bởi skill /novel-crawl.
  *
  *   novel init       <book-dir> --url <url> [--id <id>] [--adapter shuba69|shuku52] [--from N --to M]
  *   novel ingest     <book-dir> [--from N] [--to M] [--recrawl] [--headless]
@@ -10,8 +11,8 @@
  *   novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
  *   novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]
  *
- * Không lệnh nào commit nội dung truyện: bạn tự xem ingest-report.md rồi commit.
- * `snapshot` chỉ gắn tag mốc (raw-done / final) lên commit hiện có và chép backup ra Drive.
+ * Không lệnh nào chạy Git trên dữ liệu truyện. `snapshot` (git bundle) là phần cũ, sẽ được
+ * thay bằng backup zip ở slice T4.
  */
 import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
@@ -93,9 +94,17 @@ async function cmdInit(dir: string, v: Record<string, string | boolean | undefin
   const gi = join(dir, ".gitignore");
   if (!existsSync(gi)) await writeFile(gi, DATA_REPO_GITIGNORE);
   await loadBookConfig(paths.bookFile); // tự kiểm tra file vừa ghi
-  out(`Đã tạo ${paths.bookFile} và .gitignore.`);
-  out("Repo dữ liệu chưa được git init: chạy `git init` và commit sau khi ingest; backup bằng `novel snapshot` (blueprint D-11).");
+  out(`Đã tạo ${paths.bookFile}.`);
+  out("Kiểm tra adapter và phạm vi chương trong book.yaml; có thể thêm genre, title_vi, author. Bước tiếp: novel ingest.");
 }
+
+const manifestMeta = (config: BookConfig) => ({
+  bookId: config.id,
+  ...(config.title !== undefined ? { title: config.title } : {}),
+  sourceLanguage: config.language,
+  sourceUrl: config.url,
+  adapter: config.adapter ?? "unknown",
+});
 
 // ---------------------------------------------------------------- ingest
 async function cmdIngest(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
@@ -112,23 +121,23 @@ async function cmdIngest(dir: string, v: Record<string, string | boolean | undef
       log: err,
     });
     try {
+      const store = new RawStore(paths);
       const summary = await runIngest({
         adapter: built.adapter,
-        store: new RawStore(paths),
+        store,
         bookUrl: config.url,
         ...range,
         recrawl,
         maxConsecutiveFailures: config.crawler.maxConsecutiveFailures,
         log: err,
       });
+      const manifest = await store.writeManifest(manifestMeta(config));
       const c = countOutcomes(summary.results);
       out(`Kết quả: ${c.VALID} VALID, ${c.SUSPECT} SUSPECT, ${c.FAILED} FAILED, ${c.BLOCKED} BLOCKED, ${c.SKIPPED} bỏ qua.`);
       out(`Cache HTML: ${built.stats.hits} hit, ${built.stats.misses} tải mạng.`);
       if (summary.stopped) out(`Dừng sớm: ${summary.stopped}`);
       out(summary.reportWritten ? `Báo cáo: ${paths.reportFile}` : `Không có chương mới; báo cáo cũ giữ nguyên: ${paths.reportFile}`);
-      if (c.VALID + c.SUSPECT > 0) {
-        out(`Xem lại rồi tự commit, ví dụ: git -C ${dir} add chapters ingest-report.md && git -C ${dir} commit -m "raw(ch${range.from}-${range.to})"`);
-      }
+      out(`Manifest: ${paths.manifestFile} (${manifest.chapter_count} chương raw)`);
       return c.BLOCKED > 0 ? 3 : c.FAILED > 0 ? 2 : 0;
     } finally {
       await built.close();
@@ -188,7 +197,9 @@ async function cmdImport(dir: string, v: Record<string, string | boolean | undef
       index.set(job.n, { contentHash: check.contentHash, sourceChars: check.sourceChars });
       err(`[${job.n}] ${check.status}: ${chapter.title} (${check.sourceChars} ký tự)${check.issues.length ? ` ${check.issues.join(" ")}` : ""}`);
     }
+    const manifest = await store.writeManifest(manifestMeta(config));
     out(`Đã nhập ${jobs.length - failed}/${jobs.length} chương.`);
+    out(`Manifest: ${paths.manifestFile} (${manifest.chapter_count} chương raw)`);
     return failed ? 2 : 0;
   });
 }

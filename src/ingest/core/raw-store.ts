@@ -1,5 +1,6 @@
 /**
- * Lưu raw chương vào repo dữ liệu: `chapters/NNN/source.md` có frontmatter (D-07).
+ * Lưu raw chương: `books/<id>/raw/chapter-NNNN.md` có frontmatter, cùng `manifest.json`
+ * (theo `rules/artifact-contract.md` của workflow skill).
  *
  *   ---
  *   stage: source
@@ -25,24 +26,25 @@ import type { RawChapter } from "../types.js";
 import { type CheckResult, LENGTH_WINDOW, MIN_CONTENT_CHARS, type NeighborInfo, sha256 } from "./checks.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 
-/** Đường dẫn chuẩn trong một repo dữ liệu `novel-books/<book-id>/`. */
+/** Đường dẫn chuẩn trong một thư mục truyện `books/<book-id>/`. */
 export class BookPaths {
   constructor(readonly root: string) {}
   get bookFile(): string { return join(this.root, "book.yaml"); }
-  get chaptersDir(): string { return join(this.root, "chapters"); }
-  get reportFile(): string { return join(this.root, "ingest-report.md"); }
-  /** Gitignored: HTML cache (gồm cả mục lục), browser profile, lock. */
+  get rawDir(): string { return join(this.root, "raw"); }
+  get manifestFile(): string { return join(this.root, "manifest.json"); }
+  get reportFile(): string { return join(this.root, "reviews", "ingestion.md"); }
+  /** Không backup, không commit: HTML cache (gồm cả mục lục), browser profile, lock. */
   get cacheDir(): string { return join(this.root, ".cache"); }
   get htmlCacheDir(): string { return join(this.cacheDir, "html"); }
   get browserProfileDir(): string { return join(this.cacheDir, "browser-profile"); }
   get lockFile(): string { return join(this.cacheDir, "ingest.lock"); }
 
-  chapterDir(n: number): string { return join(this.chaptersDir, chapterDirName(n)); }
-  sourceFile(n: number): string { return join(this.chapterDir(n), "source.md"); }
+  sourceFile(n: number): string { return join(this.rawDir, `chapter-${chapterId(n)}.md`); }
 }
 
-/** `chapters/NNN`: tối thiểu 3 chữ số để sắp xếp đúng theo tên. */
-export const chapterDirName = (n: number): string => String(n).padStart(3, "0");
+/** Mã chương 4 chữ số (`0001`), dùng chung cho raw, bản dịch và status. */
+export const chapterId = (n: number): string => String(n).padStart(4, "0");
+const RAW_FILE_RE = /^chapter-(\d{4,})\.md$/;
 
 export interface SourceFrontmatter {
   stage: "source";
@@ -58,6 +60,42 @@ export interface SourceFrontmatter {
   metadata: Record<string, unknown>;
   fetched_at: string;
   output_sha256: string;
+}
+
+export interface ManifestMeta {
+  bookId: string;
+  title?: string;
+  sourceLanguage: string;
+  sourceUrl: string;
+  adapter: string;
+}
+
+export interface ManifestChapter {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  status: CheckResult["status"] | "MODIFIED";
+  issues: string[];
+  content_hash: string;
+  source_chars: number;
+  parser: string;
+  fetched_at: string;
+  file: string;
+}
+
+export interface Manifest {
+  book_id: string;
+  title?: string;
+  source_language: string;
+  target_language: "vi";
+  source_url: string;
+  adapter: string;
+  rights_confirmation: string;
+  chapter_count: number;
+  counts: Record<string, number>;
+  chapters: ManifestChapter[];
+  generated_at: string;
 }
 
 export interface StoredSource {
@@ -143,15 +181,62 @@ export class RawStore {
     );
   }
 
-  /** Số chương đang có source.md (theo tên thư mục). */
+  /** Số chương đang có `raw/chapter-NNNN.md` (theo tên file). */
   async listChapters(): Promise<number[]> {
     let names: string[];
     try {
-      names = await readdir(this.paths.chaptersDir);
+      names = await readdir(this.paths.rawDir);
     } catch {
       return [];
     }
-    return names.filter((d) => /^\d+$/.test(d)).map(Number).sort((a, b) => a - b);
+    return names
+      .map((f) => RAW_FILE_RE.exec(f)?.[1])
+      .filter((x): x is string => x !== undefined)
+      .map(Number)
+      .sort((a, b) => a - b);
+  }
+
+  /**
+   * Ghi `manifest.json` từ các file raw đang có (nguồn sự thật là raw, manifest chỉ là
+   * bản tổng hợp để skill đọc nhanh). Chương có file nhưng bị sửa tay: `status: MODIFIED`.
+   */
+  async writeManifest(meta: ManifestMeta): Promise<Manifest> {
+    const chapters: ManifestChapter[] = [];
+    for (const n of await this.listChapters()) {
+      const s = await this.load(n);
+      if (!s) continue;
+      const f = s.frontmatter;
+      chapters.push({
+        id: chapterId(n),
+        number: n,
+        title: f.title,
+        url: f.url,
+        status: s.intact ? f.ingest_status : "MODIFIED",
+        issues: f.issues,
+        content_hash: f.content_hash,
+        source_chars: f.source_chars,
+        parser: f.parser,
+        fetched_at: f.fetched_at,
+        file: `raw/chapter-${chapterId(n)}.md`,
+      });
+    }
+    const counts: Record<string, number> = {};
+    for (const c of chapters) counts[c.status] = (counts[c.status] ?? 0) + 1;
+    const manifest: Manifest = {
+      book_id: meta.bookId,
+      ...(meta.title !== undefined ? { title: meta.title } : {}),
+      source_language: meta.sourceLanguage,
+      target_language: "vi",
+      source_url: meta.sourceUrl,
+      adapter: meta.adapter,
+      rights_confirmation: "user-confirmed authorized input; not verified by framework",
+      chapter_count: chapters.length,
+      counts,
+      chapters,
+      generated_at: new Date().toISOString(),
+    };
+    await writeFileAtomic(this.paths.manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    return manifest;
   }
 
   /**

@@ -1,6 +1,6 @@
 /**
  * Orchestrator ingest một phạm vi chương: bỏ qua raw hợp lệ (CORE-13), tải + kiểm tra
- * + lưu, dừng batch khi BLOCKED hoặc sau N lỗi liên tiếp (CORE-06), ghi ingest-report.md.
+ * + lưu, dừng batch khi BLOCKED hoặc sau N lỗi liên tiếp (CORE-06), ghi reviews/ingestion.md.
  *
  * Không tự lấy lock: CLI bọc hàm này trong `withLock` (CORE-10).
  * Không commit: commit repo dữ liệu là việc của người dùng (Slice 1) / `validate --commit` (Slice 2+).
@@ -130,7 +130,7 @@ export async function runIngest(opts: IngestOptions): Promise<IngestSummary> {
     await writeFileAtomic(store.paths.reportFile, renderReport(summary));
     summary.reportWritten = true;
   } else {
-    log("Không có chương nào cần tải; giữ nguyên ingest-report.md.");
+    log("Không có chương nào cần tải; giữ nguyên reviews/ingestion.md.");
   }
   return summary;
 }
