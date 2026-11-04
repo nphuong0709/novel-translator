@@ -67,25 +67,38 @@ async function readLock(path: string): Promise<LockInfo | null> {
   }
 }
 
+/** Mã thoát chuẩn của shell khi bị tín hiệu: 128 + số hiệu tín hiệu. */
+const SIGNAL_EXIT: Record<"SIGINT" | "SIGTERM" | "SIGHUP", number> = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+
 function makeLock(path: string): BookLock {
   let released = false;
-  // Thoát bình thường mà quên release thì vẫn gỡ (đồng bộ, vì 'exit' không chờ Promise).
-  const onExit = (): void => {
-    if (!released) {
-      try {
-        rmSync(path, { force: true });
-      } catch {
-        /* bỏ qua */
-      }
+  const removeSync = (): void => {
+    if (released) return;
+    released = true;
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      /* bỏ qua */
     }
   };
+  // Thoát bình thường mà quên release thì vẫn gỡ (đồng bộ, vì 'exit' không chờ Promise).
+  const onExit = (): void => removeSync();
+  // Ctrl+C / kill: Node mặc định chết ngay mà KHÔNG phát 'exit', nên lock bị bỏ lại
+  // (đã tái hiện với `node` thuần; `tsx` tình cờ che lỗi này). Gỡ lock rồi thoát đúng mã.
+  // File đang ghi dở không hỏng: ghi atomic, tệ nhất còn một file `.<pid>.tmp`.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    removeSync();
+    process.exit(SIGNAL_EXIT[signal as keyof typeof SIGNAL_EXIT] ?? 1);
+  };
   process.once("exit", onExit);
+  for (const s of Object.keys(SIGNAL_EXIT)) process.once(s, onSignal);
   return {
     path,
     async release() {
       if (released) return;
       released = true;
       process.off("exit", onExit);
+      for (const s of Object.keys(SIGNAL_EXIT)) process.off(s, onSignal);
       await rm(path, { force: true });
     },
   };

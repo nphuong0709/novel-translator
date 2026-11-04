@@ -110,6 +110,28 @@ describe("CORE-10 lock", () => {
     await lock.release();
   });
 
+  it.each([["SIGINT", 130], ["SIGTERM", 143]] as const)(
+    "%s (Ctrl+C / kill) dưới node thuần: lock được gỡ, mã thoát %i",
+    async (signal, code) => {
+      const dir = await tmp();
+      const lockPath = join(dir, "l.lock");
+      const script = join(dir, "hold.mts");
+      const lockModule = new URL("../src/ingest/core/lock.ts", import.meta.url).pathname;
+      await writeFile(script, `import { acquireLock } from ${JSON.stringify(lockModule)};\nawait acquireLock(process.argv[2], "t");\nconsole.log("locked");\nsetInterval(() => {}, 1000);\n`);
+      // `node --import tsx` (không qua CLI tsx): đúng ngữ nghĩa tín hiệu của Node, như `node dist/cli.js`.
+      const child = spawn(process.execPath, ["--import", "tsx", script, lockPath], { cwd: process.cwd() });
+      await new Promise<void>((ok, fail) => {
+        child.stdout.on("data", (d: Buffer) => d.toString().includes("locked") && ok());
+        child.on("exit", () => fail(new Error("child thoát trước khi lấy lock")));
+      });
+      const exited = new Promise<number | null>((r) => child.on("exit", (c) => r(c)));
+      child.kill(signal);
+      expect(await exited).toBe(code);
+      await expect(readFile(lockPath, "utf8")).rejects.toThrow();
+    },
+    20_000,
+  );
+
   it("lock của tiến trình còn sống thì KHÔNG gỡ", async () => {
     const path = join(await tmp(), "l.lock");
     const { hostname } = await import("node:os");
