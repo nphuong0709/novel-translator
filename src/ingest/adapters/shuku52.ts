@@ -10,10 +10,10 @@
  */
 import * as cheerio from "cheerio";
 import { MIN_CONTENT_CHARS } from "../core/checks.js";
-import { charLength, escapeRegExp, ownText } from "../core/html.js";
-import { compileJunkPatterns, isJunk, type JunkPatternSpec } from "../core/junk.js";
+import { charLength, escapeRegExp, getTextStrip, ownText } from "../core/html.js";
+import { compileJunkPatterns, isJunk, type JunkPatternSpec, parserFingerprint } from "../core/junk.js";
 import { CHAPTER_NUMBER_RE, chapterNumberFromTitle } from "../core/numerals.js";
-import { CrawlError, type Fetcher, type RawChapter, type SourceAdapter } from "../types.js";
+import { CrawlError, type ExtractionStats, type Fetcher, type RawChapter, type SourceAdapter } from "../types.js";
 
 export const CONTENT_SELECTOR = "article.article-content";
 /** Tăng khi đổi cách parse để cache trang cũ (parse sai) tự bị tải lại. Giữ số của V1. */
@@ -65,11 +65,18 @@ export function parsePageList(html: string, opts: { indexUrl: string }): Array<[
   return [...pages].sort(([a], [b]) => a - b);
 }
 
+export interface ParsedPage extends ExtractionStats {
+  paragraphs: string[];
+}
+
+const nonSpaceLength = (s: string): number => charLength(s.replace(/\s+/gu, ""));
+
 /**
- * SHUKU-03, -04: đoạn văn đã lọc của một trang. Mỗi <p> chỉ lấy text của chính nó
- * (xem `ownText`), nên đoạn cuối nằm trong `<p>` không đóng vẫn còn.
+ * SHUKU-03, -04 + số liệu CORE-09. Mỗi <p> chỉ lấy text của chính nó (xem `ownText`).
+ * `accountedChars` = text của mọi <p> (giữ hoặc bị lọc là rác); `containerChars` = toàn
+ * bộ text của article (trừ script/style). Phần chênh lệch là text parser không thấy.
  */
-export function parsePageHtml(html: string, opts: { junk?: readonly RegExp[] } = {}): string[] {
+export function parsePageDetailed(html: string, opts: { junk?: readonly RegExp[] } = {}): ParsedPage {
   const { junk = DEFAULT_JUNK } = opts;
   const $ = cheerio.load(html);
   const container = $(CONTENT_SELECTOR).first();
@@ -77,11 +84,22 @@ export function parsePageHtml(html: string, opts: { junk?: readonly RegExp[] } =
     throw new CrawlError(`Không tìm thấy ${CONTENT_SELECTOR} chứa nội dung`);
   }
   const paragraphs: string[] = [];
+  let accountedChars = 0;
   for (const el of container.find("p").toArray()) {
     const value = ownText($(el)).replace(/\s+/gu, " ").trim();
+    accountedChars += nonSpaceLength(value);
     if (value && !isJunk(value, junk)) paragraphs.push(value);
   }
-  return paragraphs;
+  const containerChars = nonSpaceLength(getTextStrip(container, ""));
+  return { paragraphs, accountedChars, containerChars };
+}
+
+/**
+ * SHUKU-03, -04: đoạn văn đã lọc của một trang. Mỗi <p> chỉ lấy text của chính nó
+ * (xem `ownText`), nên đoạn cuối nằm trong `<p>` không đóng vẫn còn.
+ */
+export function parsePageHtml(html: string, opts: { junk?: readonly RegExp[] } = {}): string[] {
+  return parsePageDetailed(html, opts).paragraphs;
 }
 
 /** `CHAPTER_NUMBER_RE` neo ở đầu chuỗi, tương đương `re.match` của Python. */
@@ -108,7 +126,13 @@ export function headingNumber(paragraph: string): number | null {
   return chapterNumberFromTitle(value);
 }
 
+/** SHUKU-09: N lớn hơn chương cuối. Tách riêng để biết khi nào nên làm mới mục lục. */
+export class ChapterBeyondEndError extends CrawlError {
+  override name = "ChapterBeyondEndError";
+}
+
 export interface Shuku52Options {
+  /** Mẫu rác **đã compile** (mặc định + bổ sung từ book.yaml). */
   junk?: readonly RegExp[];
 }
 
@@ -121,13 +145,18 @@ export interface Shuku52Options {
  */
 export class Shuku52Adapter implements SourceAdapter {
   readonly id = "shuku52";
+  readonly parserFingerprint: string;
   private readonly junk: readonly RegExp[];
 
   private indexUrl: string | null = null;
+  /** Mục lục đã được tải mới (bỏ cache) trong lần chạy này chưa. Chỉ làm mới một lần. */
+  private indexFresh = false;
+  /** Trang cuối của mục lục cũ: có thể đã dài thêm, nên tải lại một lần sau khi làm mới. */
+  private staleLastPage: number | null = null;
   /** [số trang, URL] theo thứ tự đọc. */
   private pages: Array<[number, string]> = [];
-  /** index trang → đoạn văn đã lọc. */
-  private readonly pageCache = new Map<number, string[]>();
+  /** index trang → đoạn văn đã lọc + số liệu trích xuất. */
+  private readonly pageCache = new Map<number, ParsedPage>();
   /** index trang → số chương đang diễn ra ở cuối trang. */
   private readonly chapterAtCache = new Map<number, number>();
   /** số chương → index trang chứa tiêu đề (lần xuất hiện đầu tiên). */
@@ -138,6 +167,7 @@ export class Shuku52Adapter implements SourceAdapter {
     opts: Shuku52Options = {},
   ) {
     this.junk = opts.junk ?? DEFAULT_JUNK;
+    this.parserFingerprint = parserFingerprint(this.id, PARSER_VERSION, this.junk);
   }
 
   matches(url: string): boolean {
@@ -150,7 +180,15 @@ export class Shuku52Adapter implements SourceAdapter {
 
   async fetchChapter(bookUrl: string, chapterNumber: number): Promise<RawChapter> {
     await this.loadPages(bookUrl);
-    const start = await this.locate(chapterNumber);
+    let start: number;
+    try {
+      start = await this.locate(chapterNumber);
+    } catch (err) {
+      // Truyện đang ra: mục lục (có thể từ cache) chưa có chương này → làm mới một lần.
+      if (!(err instanceof ChapterBeyondEndError) || this.indexFresh) throw err;
+      await this.loadPages(bookUrl, true);
+      start = await this.locate(chapterNumber);
+    }
 
     let title = "";
     const body: string[] = [];
@@ -178,6 +216,16 @@ export class Shuku52Adapter implements SourceAdapter {
       index += 1;
     }
 
+    // CORE-09: cộng số liệu của mọi trang đã ghép.
+    const extraction: ExtractionStats = { accountedChars: 0, containerChars: 0 };
+    for (let i = start; i < index; i += 1) {
+      const page = this.pageCache.get(i);
+      if (page) {
+        extraction.accountedChars += page.accountedChars;
+        extraction.containerChars += page.containerChars;
+      }
+    }
+
     const contentLength = charLength(body.join("\n\n").trim());
     if (contentLength < MIN_CONTENT_CHARS) {
       throw new CrawlError(`Nội dung chapter ${chapterNumber} quá ngắn (${contentLength} ký tự).`);
@@ -188,7 +236,7 @@ export class Shuku52Adapter implements SourceAdapter {
       title: title || `第${chapterNumber}章`,
       paragraphs: body,
       // SHUKU-11: `index` đã vượt qua trang cuối được đọc, giống slice `[start:index]` của V1.
-      metadata: { pages: this.pages.slice(start, index).map(([n]) => n) },
+      metadata: { pages: this.pages.slice(start, index).map(([n]) => n), extraction },
     };
   }
 
@@ -200,10 +248,15 @@ export class Shuku52Adapter implements SourceAdapter {
     return page;
   }
 
-  private async loadPages(bookUrl: string): Promise<void> {
+  private async loadPages(bookUrl: string, fresh = false): Promise<void> {
     const indexUrl = normalizeIndexUrl(bookUrl);
-    if (this.indexUrl === indexUrl && this.pages.length > 0) return;
-    const pages = parsePageList(await this.fetcher(indexUrl), { indexUrl });
+    if (!fresh && this.indexUrl === indexUrl && this.pages.length > 0) return;
+    if (this.indexUrl !== indexUrl) this.indexFresh = false;
+    const pages = parsePageList(await this.fetcher(indexUrl, fresh ? { fresh: true } : {}), { indexUrl });
+    if (fresh) {
+      this.indexFresh = true;
+      this.staleLastPage = this.pages.at(-1)?.[0] ?? null;
+    }
     this.indexUrl = indexUrl;
     this.pages = pages;
     this.pageCache.clear();
@@ -213,15 +266,17 @@ export class Shuku52Adapter implements SourceAdapter {
 
   private async paragraphs(index: number): Promise<string[]> {
     const cached = this.pageCache.get(index);
-    if (cached) return cached;
-    const [, url] = this.pageAt(index);
-    const paragraphs = parsePageHtml(await this.fetcher(url), { junk: this.junk });
-    this.pageCache.set(index, paragraphs);
-    for (const p of paragraphs) {
+    if (cached) return cached.paragraphs;
+    const [pageNumber, url] = this.pageAt(index);
+    const fresh = pageNumber === this.staleLastPage;
+    if (fresh) this.staleLastPage = null;
+    const page = parsePageDetailed(await this.fetcher(url, fresh ? { fresh: true } : {}), { junk: this.junk });
+    this.pageCache.set(index, page);
+    for (const p of page.paragraphs) {
       const n = headingNumber(p);
       if (n !== null && !this.headingPage.has(n)) this.headingPage.set(n, index);
     }
-    return paragraphs;
+    return page.paragraphs;
   }
 
   /**
@@ -260,7 +315,7 @@ export class Shuku52Adapter implements SourceAdapter {
     let high = this.pages.length - 1;
     const last = await this.chapterAt(high);
     if (last < chapterNumber) {
-      throw new CrawlError(`Không có chapter ${chapterNumber}; chương cuối là ${last}.`);
+      throw new ChapterBeyondEndError(`Không có chapter ${chapterNumber}; chương cuối là ${last}.`);
     }
     while (low < high) {
       const middle = Math.floor((low + high) / 2);

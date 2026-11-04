@@ -1,6 +1,7 @@
 /**
  * Lọc rác theo từng đoạn. Port từ V1 `compile_junk_patterns` / `is_junk`.
  */
+import { createHash } from "node:crypto";
 
 /** CORE-04: regex trong config phải ở dạng {pattern, flags} vì JS không hỗ trợ cờ inline (?i). */
 export interface JunkPatternSpec {
@@ -39,6 +40,17 @@ export function compileJunkPatterns(
       });
     }
   });
+}
+
+/**
+ * Fingerprint parser: `<adapter>@<parserVersion>+junk:<8 hex>`. Đổi parser **hoặc**
+ * mẫu rác (kể cả `junkPatterns` trong book.yaml) thì fingerprint đổi, raw cũ được
+ * parse lại từ HTML cache (CORE-12, CORE-13).
+ */
+export function parserFingerprint(adapterId: string, parserVersion: number, junk: readonly RegExp[]): string {
+  const spec = junk.map((re) => `${re.flags}/${re.source}`).join("\n");
+  const digest = createHash("sha256").update(spec, "utf8").digest("hex").slice(0, 8);
+  return `${adapterId}@${parserVersion}+junk:${digest}`;
 }
 
 /**
