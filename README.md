@@ -1,6 +1,6 @@
 # novel-translator
 
-Framework cá nhân dịch tiểu thuyết EN/ZH sang tiếng Việt bằng Claude Code (subagent dịch, 2 critic độc lập, batch critic, final critic), xuất EPUB. Mọi stage đều được commit Git.
+Framework cá nhân dịch tiểu thuyết EN/ZH sang tiếng Việt bằng Claude Code (3 subagent: translator, chapter-critic 2 vòng + hồi quy, consistency-critic), xuất EPUB. Mọi stage đều được commit Git.
 
 - Thiết kế: [docs/blueprint-v4.md](docs/blueprint-v4.md)
 - Quirk của các nguồn (bài học từ bản V1): [docs/source-quirks.md](docs/source-quirks.md)

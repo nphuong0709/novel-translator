@@ -1,6 +1,6 @@
 # Novel Translator — Blueprint V4
 
-> **Trạng thái:** đã chốt hướng, đang làm Slice 1 (ingest).
+> **Trạng thái:** Slice 1 xong (tag `slice-1`). Đang chuẩn bị Slice 2 với kiến trúc 3 subagent (D-04, D-05, D-13, D-14 sửa/thêm ngày 2026-11-04).
 > **Thay cho:** Blueprint V3 (bản review). Các mục không nhắc lại ở đây giữ nguyên tinh thần V3.
 > **Phạm vi:** công cụ cá nhân, chạy local bằng Claude Code; nguồn EN/ZH → tiếng Việt → EPUB.
 
@@ -13,8 +13,8 @@
 | D-01 | Chạy local bằng Claude Code; không UI, không DB, không backend | Công cụ một người dùng |
 | D-02 | **TypeScript (Node 24)** cho mọi phần code: ingest, validate, export | Mục tiêu học TS; Python ngoài phạm vi. Kiến thức từ bản Python được giữ lại qua golden test (mục 8) |
 | D-03 | Skill chỉ để điều phối; luật cứng nằm trong code (`validate`) | Lời dặn trong prompt không phải transaction boundary |
-| D-04 | Translator, 2 critic, editor, batch critic, final critic là các subagent riêng | Không để agent tự duyệt bản của chính mình |
-| D-05 | **Phương án C**: gom 2–3 chương mỗi lượt; 2 critic chạy song song; script áp fix; editor chỉ chạy khi cần | Ít hơn khoảng 3 lần token so với 6 vòng mà vẫn giữ 2 critic độc lập (mục 4) |
+| D-04 | *(sửa 2026-11-04)* **3 subagent**: `translator` (dịch + sửa theo issue), `chapter-critic` (R1 nghĩa / R2 tiếng Việt / R1-delta hồi quy), `consistency-critic` (Batch / Final). Critic chỉ đọc, không ghi file | Ít agent cần bảo trì; người viết và người đánh giá vẫn tách nhau. *Bản cũ: 6 agent (translator, 2 critic, editor, batch, final).* |
+| D-05 | *(sửa 2026-11-04)* **Phương án D**: nhóm 2–3 chương; R1 → sửa → R2 → sửa → **R1-delta bắt buộc**; `apply-fixes` (code) chạy trước, translator chỉ nhận issue còn lại; mỗi lượt critic là một lần gọi subagent độc lập với input liệt kê và hash rõ ràng (mục 7) | R2 duyệt bản đã sửa nghĩa; không còn xung đột 2 critic sửa cùng chỗ. Đánh đổi: tuần tự (chậm hơn C), token ngang hoặc hơn C một chút, phải đo ở PoC. *Bản cũ: phương án C, 2 critic song song + editor.* |
 | D-06 | Commit review **trước** commit sửa | Lịch sử cho thấy ai phát hiện gì, ai sửa gì |
 | D-07 | **Trạng thái được tính lại từ artifact và hash**, không lưu state file riêng | Không thể lệch giữa trạng thái và file thật |
 | D-08 | EPUB bằng Pandoc, kiểm tra bằng epubcheck | Không tự viết bộ đóng gói EPUB |
@@ -22,7 +22,8 @@
 | D-10 | Tách 2 repo: framework và dữ liệu truyện | Text truyện không nằm chung repo với code |
 | D-11 | *(sửa 2026-11-04)* Repo dữ liệu **chỉ ở local**; backup bằng `novel snapshot` ra **Google Drive** (qua Google Drive for desktop): `git bundle` đủ lịch sử ở mốc `raw` và `final`, và sau mỗi batch dịch (giữ N bản mới nhất); kèm zip raw và `.epub`. **Không mã hóa.** | Không phải quản lý khóa GPG; EPUB đọc được ngay trên Drive. Đánh đổi chấp nhận: Google đọc được nội dung. *Bản cũ: remote GitHub qua `git-remote-gcrypt`.* |
 | D-12 | Mỗi chương 4 commit: `raw`, `translate`, `review`, `fix`/`approve` | Giữ được kiểm vết mà không phải tới 16 commit một chương |
-| D-13 | Final critic chỉ làm kiểm tra xuyên batch | Batch critic đã đọc từng chương |
+| D-13 | *(sửa 2026-11-04)* `consistency-critic` **Batch Mode** ở ranh giới nhóm đầu tiên khi đã duyệt ≥ 10 chương kể từ batch trước; **Final Mode** chỉ kiểm tra xuyên batch | Chapter-critic đã đọc từng chương; hai mode chỉ khác phạm vi dữ liệu. *Bản cũ: batch-critic và final-critic là 2 agent.* |
+| D-14 | *(mới 2026-11-04)* **Model theo profile của truyện** (`book.yaml` → `translation.profile: epic \| standard`, có thể ghi đè từng lượt). Code điều phối truyền `model` + `effort` cho từng lần gọi; không để LLM tự chọn. Chỉ dùng Opus 5.5 / Sonnet 5.5 (không Fable, không Haiku) | Truyện cổ đại/huyền huyễn/bối cảnh lớn cần Opus effort cao; truyện hiện đại có thể hạ effort. Chốt bằng số liệu golden set (mục 7.3) |
 
 ## 2. Nguyên tắc truy cập nguồn (thay nguyên tắc 11 của V3)
 
@@ -43,16 +44,17 @@
 │   ├── src/ingest/adapters/     shuba69.ts, shuku52.ts, local-file.ts
 │   ├── src/validate/            gate tất định (Slice 2)
 │   ├── src/cli.ts               ingest | import | validate | status | export
-│   ├── .claude/agents/          (Slice 2) translator, semantic-critic, vietnamese-critic, editor, batch-critic, final-critic
+│   ├── .claude/agents/          (Slice 2) translator, chapter-critic; (Slice 4) consistency-critic
 │   ├── .claude/skills/          (Slice 2+) ingest, translate-batch, review-batch, finalize, status
 │   ├── rules/                   (Slice 2) port từ translation_skills/*.md của bản V1
 │   └── tests/fixtures + golden  HTML tổng hợp, KHÔNG chứa text truyện thật
 └── novel-books/
     └── <book-id>/               ← mỗi truyện 1 repo DỮ LIỆU (chỉ local; backup: Drive `My Drive/novel-backups/<book-id>/`)
-        ├── book.yaml            url, adapter, ngôn ngữ, phạm vi chương
-        ├── context/             characters.md, relationships.md, glossary.md, style-guide.md, continuity.md
-        ├── chapters/NNN/        source.md, draft_v1.md, summary.md, semantic_review.md, language_review.md, draft_v2.md
-        ├── batch-reviews/  final-review.md  export-manifest.json
+        ├── book.yaml            url, adapter, ngôn ngữ, phạm vi chương, translation.profile
+        ├── context/             characters.md, relationships.md, glossary.md, style-guide.md, continuity.md (có version, mục 7.4)
+        ├── chapters/NNN/        source.md, draft_v1.md, summary.md, review_r1.md, draft_v2.md, review_r2.md, draft_v3.md, regression.md
+        ├── consistency/         batch-NNN-MMM.md, final.md
+        ├── export-manifest.json
         ├── ingest-report.md
         └── .cache/              (gitignored) html/, catalog.json, browser-profile/
 ```
@@ -66,19 +68,21 @@ Không bao giờ commit: `.env`, `browser-profile/`, `token.json`, `credentials.
           → trạng thái mỗi chương VALID | SUSPECT | BLOCKED | FAILED → ingest-report.md → commit raw(...)
           → đủ raw: `novel snapshot --stage raw` (tag raw-done, bundle + zip lên Drive)
 
-/translate-batch (theo nhóm 2–3 chương):
-  translator           → draft_v1.md + summary.md (mỗi chương)          → commit translate(chNNN-MMM)
-  semantic-critic ∥ vietnamese-critic (chỉ đọc)  → 2 review / chương      → commit review(...)
-  apply-fixes (code)   → áp `excerpt → fix` khớp chính xác → draft_v2.md
-                         fix không khớp / xung đột / thay >30% câu → danh sách cho editor
-  editor (chỉ khi danh sách khác rỗng)                                   → draft_v2.md
-  validate (code)      → độ phủ đoạn, chữ Hán sót, glossary, hash
-                         + semantic-critic chạy delta nếu editor sửa nghĩa
+/translate-batch (theo nhóm 2–3 chương; mỗi dòng "agent" là MỘT lần gọi subagent độc lập):
+  translator (dịch)                 → draft_v1.md + summary.md (+ context-delta đề xuất) → commit translate(chNNN-MMM)
+  chapter-critic R1 (trọn chương)   → review_r1.md: nghĩa, nhân vật, context, xưng hô     → commit review(...)
+    validate: kiểm bằng chứng (excerpt nguyên văn có thật) → apply-fixes (code, khớp chính xác)
+    translator (sửa: chỉ issue còn lại, chỉ đoạn liên quan ±1)                            → draft_v2.md
+    validate: chỉ đoạn có issue được đổi; giới hạn mức thay đổi
+  chapter-critic R2 (trọn chương + các thay đổi sau R1) → review_r2.md: tự nhiên, dịch máy, chất văn → commit review(...)
+    apply-fixes → translator (phần còn lại) → draft_v3.md → validate (như trên)
+  chapter-critic R1-delta (chỉ đoạn đã đổi sau R2)       → regression.md: hồi quy nghĩa
+  validate cuối: độ phủ đoạn, chữ Hán sót, glossary, hash
                        → approve | rework (≤2 lần) | NEEDS_HUMAN_REVIEW   → commit fix/approve(...)
-  sau mỗi N chương: batch-critic đọc summary.md + glossary + đoạn bị gắn cờ, ghi rõ độ phủ → commit
+  ranh giới nhóm, đã duyệt ≥ 10 chương: consistency-critic Batch → sửa → R1-delta → commit
   sau mỗi batch: `novel snapshot --stage batch` (bundle lên Drive, giữ N bản mới nhất)
 
-/finalize → final-critic (xuyên batch) → sửa + regression → pandoc → epubcheck → export-manifest.json → commit
+/finalize → consistency-critic Final (xuyên batch) → sửa → R1-delta → pandoc → epubcheck → export-manifest.json → commit
           → `novel snapshot --stage final --epub <file>` (tag final, bundle + epub lên Drive)
 /status   → tính trạng thái từ artifact + git log; không ghi gì
 ```
@@ -91,10 +95,11 @@ Mỗi artifact có frontmatter ghi hash của input:
 
 ```yaml
 ---
-stage: semantic_review
+stage: review_r1
 chapter: 12
-agent: semantic-critic
-input: { source: sha256:…, draft_v1: sha256:… }
+agent: chapter-critic
+model: opus-5.5 · high          # profile epic (D-14)
+input: { source: sha256:…, draft_v1: sha256:…, context: v3@sha256:… }
 output_sha256: sha256:…
 ---
 ```
@@ -135,13 +140,46 @@ interface SourceAdapter {
 - Ghi file theo kiểu atomic: viết vào file tạm có PID riêng, rồi đổi tên.
 - **Cache HTML gốc** kèm `parserVersion`; sửa parser thì parse lại offline, không gọi mạng.
 
-## 7. Phương án C — chi tiết critic
+## 7. Phương án D — chi tiết
 
-- Nhóm 2–3 chương mỗi lượt gọi; đo cả nhóm 2 và nhóm 3 ở PoC.
-- Issue bắt buộc có `translation_excerpt` trích **nguyên văn** từ bản nháp, cùng `proposed_fix`; thiếu thì không được áp tự động.
-- Script áp fix theo thứ tự: issue `CRITICAL`/`MAJOR` trước; hai critic sửa cùng một excerpt thì gọi là xung đột và chuyển cho editor.
-- Model cho từng agent được khai báo trong frontmatter. Chọn theo số liệu golden set, không theo cảm tính.
-- Ước lượng (cần đo lại): khoảng 40k token input và 11k output mỗi chương, so với khoảng 135k và 26k của phương án 6 vòng.
+### 7.1 Ràng buộc (code ép, không chỉ dặn trong prompt)
+
+| Yêu cầu | Cơ chế |
+|---|---|
+| Critic không tự đánh giá bản do mình tạo | Critic chỉ đọc (agent không có tool ghi). Hồi quy cho fix của lượt X dùng **rubric khác X** (fix R2 → R1-delta; fix consistency → R1-delta). Phần kiểm được bằng code (glossary, xưng hô đã chốt) do `validate` kiểm |
+| Mỗi lượt critic độc lập, phạm vi xác định | Mỗi lượt một lần gọi subagent; input liệt kê tường minh và ghi hash vào frontmatter review (D-07) |
+| Issue phải có bằng chứng | Issue gồm `source_excerpt`, `translation_excerpt` (nguyên văn), rubric, severity, `proposed_fix`. `validate` loại issue có excerpt không tồn tại trong `source.md` / bản nháp trước khi tới translator |
+| Translator chỉ sửa lỗi có bằng chứng | `apply-fixes` (code) áp trước các fix khớp chính xác. Translator chỉ nhận issue còn lại + đoạn liên quan ±1. Hash từng đoạn: đoạn không có issue phải giữ nguyên từng byte; đổi > 30% câu của đoạn hoặc thay đổi không gắn issue ID → từ chối |
+| Hồi quy sau sửa | `validate` (độ phủ, chữ Hán sót, glossary, phạm vi sửa) + R1-delta bắt buộc sau khi sửa theo R2 / consistency. Tối đa 2 vòng rework, sau đó `NEEDS_HUMAN_REVIEW` |
+| Delta-based | Sửa: chỉ đoạn có issue. Duyệt lại: R1-delta chỉ đọc đoạn đã đổi + đoạn gốc + issue. R1 và R2 vẫn đọc trọn chương (R2 không đánh giá độ tự nhiên qua delta được) |
+
+### 7.2 Profile model (D-14)
+
+| Lượt | `epic` (cổ đại, huyền huyễn, bối cảnh lớn) | `standard` (hiện đại) |
+|---|---|---|
+| translator: dịch | Opus 5.5 · high | Opus 5.5 · medium |
+| translator: sửa | Opus 5.5 · medium | Opus 5.5 · medium |
+| chapter-critic R1 | Opus 5.5 · high | Opus 5.5 · medium |
+| chapter-critic R2 | Opus 5.5 · medium | Sonnet 5.5 · medium |
+| chapter-critic R1-delta | Sonnet 5.5 · medium | Sonnet 5.5 · medium |
+| consistency-critic Batch | Sonnet 5.5 · high | Sonnet 5.5 · medium |
+| consistency-critic Final | Opus 5.5 · high | Opus 5.5 · medium |
+
+- `standard` giữ nguyên model và **hạ effort trước**; chỉ hạ R2 xuống Sonnet. R1 luôn là Opus: người soát nghĩa không yếu hơn người dịch.
+- Bỏ Fable/Haiku: Fable vượt nhu cầu và budget; Haiku không hợp với lượt cần phán đoán, còn kiểm tra rẻ đã do code làm.
+- Rủi ro lỗi trùng điểm mù (translator và R1 cùng model): bù bằng rubric riêng, context mới mỗi lượt, bằng chứng bắt buộc, và đo bằng golden set.
+
+### 7.3 Chốt bằng số liệu (PoC Slice 2)
+
+- KZGD 2–3 chương, cài sẵn 10 lỗi. Chạy `epic` trước; chạy thêm `standard` trên cùng chương để đo mức chênh.
+- Đo: lỗi cài sẵn bắt được (≥ 8/10), issue báo sai, usage mỗi chương, thời gian mỗi nhóm; so nhóm 2 và nhóm 3 chương.
+- `standard` chỉ dùng cho truyện hiện đại khi không tụt quá ngưỡng trên. Kiểm lại `epic` trên một truyện cổ đại/huyền huyễn khi có.
+
+### 7.4 Context có version
+
+- Translator chỉ **đề xuất** context-delta; mỗi mục kèm trích dẫn nguyên văn (chương + câu) và chương bắt đầu hiệu lực. Không suy diễn: mục không có trích dẫn bị loại.
+- Code kiểm trích dẫn có thật trong `source.md` rồi mới tăng version. Consistency-critic duyệt các context-delta ở Batch Mode.
+- Frontmatter mỗi bản nháp/review ghi hash version context đã dùng; context đổi thì artifact phía sau tự không hợp lệ (D-07). Chi tiết ở Slice 3.
 
 ## 8. Chuyển kiến thức từ bản Python sang TS
 
@@ -158,14 +196,14 @@ Golden mô tả **hành vi mong muốn**, không phải chi tiết hiện thực
 | Slice | Nội dung | Xong khi |
 |---|---|---|
 | **1** | Ingest TS: core + shuku52 + shuba69 + local-file, CLI `ingest`/`import`, repo dữ liệu đầu tiên | Golden test xanh; cào lại KZGD 1–201 khớp hash với bản Python đã sửa (hoặc lệch có giải thích); lock, cache, resume chạy đúng |
-| 2 | 1 nhóm chương, đủ agent theo phương án C + `validate` + golden set lỗi cài sẵn | Bắt được ≥ 8/10 lỗi cài sẵn; commit đúng 4 bước; gate chặn được review cũ (stale) |
-| 3 | Context có version, 5–10 chương, resume giữa chừng | Xưng hô và tiêu đề đổi theo phạm vi chương mà không sửa lan sang chương cũ |
-| 4 | Batch critic | Phát hiện tên hoặc tiêu đề không nhất quán đã cài sẵn; sửa xong thì duyệt lại |
-| 5 | Final + EPUB | Bị chặn khi còn chương chưa duyệt; epubcheck pass; manifest trỏ đúng commit |
+| 2 | 1 nhóm chương: `translator` + `chapter-critic` (R1, R2, R1-delta) theo phương án D + `validate` + golden set lỗi cài sẵn; profile `epic` và `standard` | Bắt được ≥ 8/10 lỗi cài sẵn; `validate` chặn issue không có bằng chứng và sửa ngoài phạm vi; commit đúng 4 bước; gate chặn được review cũ (stale); có số liệu usage cho 2 profile |
+| 3 | Context có version (mục 7.4), 5–10 chương, resume giữa chừng | Xưng hô và tiêu đề đổi theo phạm vi chương mà không sửa lan sang chương cũ; context-delta không có trích dẫn bị loại |
+| 4 | `consistency-critic` Batch Mode | Phát hiện tên hoặc tiêu đề không nhất quán đã cài sẵn; sửa xong thì R1-delta duyệt lại |
+| 5 | `consistency-critic` Final Mode + EPUB | Bị chặn khi còn chương chưa duyệt; epubcheck pass; manifest trỏ đúng commit |
 
 ## 10. Việc mở và rủi ro còn lại
 
-- **Cần xác minh trong docs Claude Code:** subagent có gọi được subagent khác không (giả định là không, nên điều phối ở phiên chính); gọi 2 critic song song; payload của hook `SubagentStop` dùng để log agent thật; cách skill nhận tham số.
+- **Cần xác minh trong docs Claude Code (B1):** subagent có gọi được subagent khác không (giả định là không, nên điều phối ở phiên chính); payload của hook `SubagentStop` dùng để log agent thật; cách skill nhận tham số; **ghi đè `model` cho từng lần gọi** (D-14 cần; tool gọi subagent có tham số `model` nhưng phải xác nhận thứ tự ưu tiên với frontmatter); **đặt `effort` cho từng agent / từng lần gọi**; agent frontmatter giới hạn tool (critic không có Write/Edit).
 - **Công cụ cần cài:** Google Drive for desktop (backup), `pandoc` + `epubcheck` (Slice 5). `gpg`/`git-remote-gcrypt` không còn cần sau khi sửa D-11.
 - **Backup chỉ tốt bằng lần snapshot gần nhất:** quên chạy `snapshot --stage batch` thì công dịch từ lần trước chỉ có ở local. Nội dung trên Drive không mã hóa.
 - Truyện dài 200+ chương có thể chạm usage limit; đo ở Slice 2 trước khi chạy cả bộ.
