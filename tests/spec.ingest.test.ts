@@ -195,6 +195,24 @@ describe("runIngest", () => {
     expect(await readFile(paths.sourceFile(1), "utf8")).toBe(before);
   });
 
+  it("lần chạy toàn SKIPPED không ghi đè report của lần chạy trước", async () => {
+    const { paths, store } = await setup();
+    const s1 = await runIngest({ ...base, adapter: fakeAdapter({}), store, from: 1, to: 2 });
+    expect(s1.reportWritten).toBe(true);
+    const before = await readFile(paths.reportFile, "utf8");
+    expect(before).toMatch(/2 VALID/);
+
+    const s2 = await runIngest({ ...base, adapter: fakeAdapter({}), store, from: 1, to: 2 });
+    expect(s2.results.every((r) => r.outcome === "SKIPPED")).toBe(true);
+    expect(s2.reportWritten).toBe(false);
+    expect(await readFile(paths.reportFile, "utf8")).toBe(before);
+
+    // Có ít nhất một chương được tải (kể cả FAILED) thì report được ghi lại.
+    const s3 = await runIngest({ ...base, adapter: fakeAdapter({ 3: new CrawlError("x") }), store, from: 1, to: 3 });
+    expect(s3.reportWritten).toBe(true);
+    expect(await readFile(paths.reportFile, "utf8")).toMatch(/0 VALID, 0 SUSPECT, 1 FAILED, 0 BLOCKED, 2 bỏ qua/);
+  });
+
   it("ghi ingest-report.md có bảng kết quả", async () => {
     const { paths, store } = await setup();
     await runIngest({ ...base, adapter: fakeAdapter({ 2: new CrawlError("a|b") }), store, from: 1, to: 2 });

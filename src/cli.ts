@@ -120,7 +120,7 @@ async function cmdIngest(dir: string, v: Record<string, string | boolean | undef
       out(`Kết quả: ${c.VALID} VALID, ${c.SUSPECT} SUSPECT, ${c.FAILED} FAILED, ${c.BLOCKED} BLOCKED, ${c.SKIPPED} bỏ qua.`);
       out(`Cache HTML: ${built.stats.hits} hit, ${built.stats.misses} tải mạng.`);
       if (summary.stopped) out(`Dừng sớm: ${summary.stopped}`);
-      out(`Báo cáo: ${paths.reportFile}`);
+      out(summary.reportWritten ? `Báo cáo: ${paths.reportFile}` : `Không có chương mới; báo cáo cũ giữ nguyên: ${paths.reportFile}`);
       if (c.VALID + c.SUSPECT > 0) {
         out(`Xem lại rồi tự commit, ví dụ: git -C ${dir} add chapters ingest-report.md && git -C ${dir} commit -m "raw(ch${range.from}-${range.to})"`);
       }

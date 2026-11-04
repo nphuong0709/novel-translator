@@ -32,6 +32,8 @@ export interface IngestSummary {
   results: ChapterResult[];
   /** Lý do dừng sớm, nếu có. */
   stopped?: string;
+  /** false khi lần chạy không tải chương nào (toàn SKIPPED): report cũ được giữ nguyên. */
+  reportWritten: boolean;
 }
 
 export interface IngestOptions {
@@ -66,6 +68,7 @@ export async function runIngest(opts: IngestOptions): Promise<IngestSummary> {
     startedAt: now().toISOString(),
     finishedAt: "",
     results: [],
+    reportWritten: false,
   };
   const index = await store.loadIndex();
   let consecutiveFailures = 0;
@@ -121,7 +124,14 @@ export async function runIngest(opts: IngestOptions): Promise<IngestSummary> {
   }
 
   summary.finishedAt = now().toISOString();
-  await writeFileAtomic(store.paths.reportFile, renderReport(summary));
+  // Lần chạy toàn SKIPPED không có thông tin mới: không ghi đè report của lần chạy
+  // có tải chương gần nhất (lịch sử các lần trước nằm trong git của repo dữ liệu).
+  if (summary.results.some((r) => r.outcome !== "SKIPPED")) {
+    await writeFileAtomic(store.paths.reportFile, renderReport(summary));
+    summary.reportWritten = true;
+  } else {
+    log("Không có chương nào cần tải; giữ nguyên ingest-report.md.");
+  }
   return summary;
 }
 
