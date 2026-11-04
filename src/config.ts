@@ -43,6 +43,8 @@ export interface BookConfig {
   language: "zh" | "en";
   chapters?: { from: number; to: number };
   crawler: CrawlerConfig;
+  /** `novel snapshot`. `dir` là thư mục gốc (tool thêm `/<id>`); bỏ trống = Google Drive for desktop `My Drive/novel-backups`. */
+  backup: { dir?: string; keepBatches: number };
 }
 
 /** Mặc định theo V1: 69shuba chậm hơn (Cloudflare), 52shuku là HTTP thường. */
@@ -161,8 +163,14 @@ export function parseBookConfig(raw: unknown): BookConfig {
   const numbering = str(c, "numbering") ?? d.numbering;
   if (numbering !== "title" && numbering !== "order") throw new ConfigError("book.yaml: crawler.numbering phải là title hoặc order");
 
+  const b = raw["backup"] ?? {};
+  if (!isObj(b)) throw new ConfigError("book.yaml: 'backup' phải là object");
+  const backupDir = str(b, "dir");
+  const backup = { ...(backupDir !== undefined ? { dir: backupDir } : {}), keepBatches: num(b, "keepBatches", 5, { min: 1, int: true }) };
+
   const title = str(raw, "title");
   return {
+    backup,
     id,
     ...(title !== undefined ? { title } : {}),
     url,

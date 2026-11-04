@@ -8,11 +8,14 @@
  *   novel import     <book-dir> --dir <v1-raw-dir> [--from N] [--to M]
  *   novel status     <book-dir> [--from N] [--to M]
  *   novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
+ *   novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]
  *
- * Không lệnh nào commit hay push repo dữ liệu: bạn tự xem ingest-report.md rồi commit.
+ * Không lệnh nào commit nội dung truyện: bạn tự xem ingest-report.md rồi commit.
+ * `snapshot` chỉ gắn tag mốc (raw-done / final) lên commit hiện có và chép backup ra Drive.
  */
 import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { stringify as stringifyYaml } from "yaml";
@@ -26,6 +29,7 @@ import { LockHeldError, withLock } from "./ingest/core/lock.js";
 import { BookPaths, neighborsOf, RawStore } from "./ingest/core/raw-store.js";
 import { buildAdapter } from "./ingest/factory.js";
 import { countOutcomes, runIngest } from "./ingest/run.js";
+import { createSnapshot, describeFile, findGoogleDriveRoot, SnapshotError } from "./snapshot.js";
 
 const out = (msg = "") => process.stdout.write(`${msg}\n`);
 const err = (msg: string) => process.stderr.write(`${msg}\n`);
@@ -40,7 +44,8 @@ const USAGE = `Cách dùng:
   novel import     <book-dir> --chapter N --file <path> [--title <t>]
   novel import     <book-dir> --dir <v1-raw-dir> [--from N] [--to M]
   novel status     <book-dir> [--from N] [--to M]
-  novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]`;
+  novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
+  novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]`;
 
 function intOpt(v: string | undefined, name: string): number | undefined {
   if (v === undefined) return undefined;
@@ -89,7 +94,7 @@ async function cmdInit(dir: string, v: Record<string, string | boolean | undefin
   if (!existsSync(gi)) await writeFile(gi, DATA_REPO_GITIGNORE);
   await loadBookConfig(paths.bookFile); // tự kiểm tra file vừa ghi
   out(`Đã tạo ${paths.bookFile} và .gitignore.`);
-  out("Repo dữ liệu chưa được git init / gắn remote: việc đó bạn tự làm (gcrypt, xem blueprint D-11).");
+  out("Repo dữ liệu chưa được git init: chạy `git init` và commit sau khi ingest; backup bằng `novel snapshot` (blueprint D-11).");
 }
 
 // ---------------------------------------------------------------- ingest
@@ -267,6 +272,48 @@ async function cmdCrosscheck(dir: string, v: Record<string, string | boolean | u
   return diff.length ? 2 : 0;
 }
 
+// ---------------------------------------------------------------- snapshot
+async function cmdSnapshot(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const stage = v["stage"];
+  if (stage !== "raw" && stage !== "batch" && stage !== "final") throw new UsageError("snapshot cần --stage raw|batch|final");
+  const paths = new BookPaths(dir);
+  const config = await loadBookConfig(paths.bookFile);
+  const expand = (p: string) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
+
+  let base: string;
+  if (typeof v["dest"] === "string") base = expand(v["dest"]);
+  else if (config.backup.dir) base = expand(config.backup.dir);
+  else base = join(await findGoogleDriveRoot(), "novel-backups");
+  const destDir = join(base, config.id);
+
+  // raw: chặn khi phạm vi chương chưa đủ / còn chương chưa VALID-SUSPECT.
+  if (stage === "raw" && config.chapters) {
+    const store = new RawStore(paths);
+    const missing: number[] = [];
+    for (let n = config.chapters.from; n <= config.chapters.to; n += 1) {
+      const s = await store.load(n);
+      if (!s?.intact) missing.push(n);
+    }
+    if (missing.length) throw new UsageError(`Chưa đủ raw hợp lệ cho chương ${compactRanges(missing)}; chưa thể đánh dấu raw-done.`);
+  }
+
+  return withLock(paths.lockFile, `snapshot ${stage}`, async () => {
+    const r = await createSnapshot({
+      bookDir: dir,
+      bookId: config.id,
+      stage,
+      destDir,
+      keepBatches: config.backup.keepBatches,
+      ...(typeof v["epub"] === "string" ? { epubPath: v["epub"] } : {}),
+    });
+    out(`Snapshot ${stage} của commit ${r.commit.slice(0, 7)}${r.tag ? ` (tag ${r.tag})` : ""} → ${destDir}`);
+    for (const f of r.files) out(`  + ${describeFile(f)}`);
+    for (const p of r.pruned) out(`  - xóa bản batch cũ: ${p}`);
+    out("Google Drive for desktop sẽ tự đồng bộ lên drive.google.com (My Drive/novel-backups).");
+    return 0;
+  });
+}
+
 // ---------------------------------------------------------------- main
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
@@ -291,6 +338,9 @@ export async function main(argv: string[]): Promise<number> {
       dir: { type: "string" },
       title: { type: "string" },
       "v1-raw": { type: "string" },
+      stage: { type: "string" },
+      dest: { type: "string" },
+      epub: { type: "string" },
     },
   });
   const dir = positionals[0];
@@ -308,6 +358,8 @@ export async function main(argv: string[]): Promise<number> {
       return cmdStatus(dir, values);
     case "crosscheck":
       return cmdCrosscheck(dir, values);
+    case "snapshot":
+      return cmdSnapshot(dir, values);
     default:
       throw new UsageError(`Lệnh không rõ: ${command}\n${USAGE}`);
   }
@@ -318,7 +370,7 @@ if (isEntry) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e: unknown) => {
-      if (e instanceof UsageError || e instanceof ConfigError || e instanceof LockHeldError) {
+      if (e instanceof UsageError || e instanceof ConfigError || e instanceof LockHeldError || e instanceof SnapshotError) {
         err(e.message);
         process.exit(1);
       }

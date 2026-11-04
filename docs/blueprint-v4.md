@@ -20,7 +20,7 @@
 | D-08 | EPUB bằng Pandoc, kiểm tra bằng epubcheck | Không tự viết bộ đóng gói EPUB |
 | D-09 | Nguồn EN/ZH (Giản thể và Phồn thể), đích là tiếng Việt | Nhật/Hàn để V2 |
 | D-10 | Tách 2 repo: framework và dữ liệu truyện | Text truyện không nằm chung repo với code |
-| D-11 | Repo dữ liệu đẩy lên GitHub private qua **`git-remote-gcrypt`** | GitHub chỉ thấy blob đã mã hóa, kể cả tên file và commit message |
+| D-11 | *(sửa 2026-11-04)* Repo dữ liệu **chỉ ở local**; backup bằng `novel snapshot` ra **Google Drive** (qua Google Drive for desktop): `git bundle` đủ lịch sử ở mốc `raw` và `final`, và sau mỗi batch dịch (giữ N bản mới nhất); kèm zip raw và `.epub`. **Không mã hóa.** | Không phải quản lý khóa GPG; EPUB đọc được ngay trên Drive. Đánh đổi chấp nhận: Google đọc được nội dung. *Bản cũ: remote GitHub qua `git-remote-gcrypt`.* |
 | D-12 | Mỗi chương 4 commit: `raw`, `translate`, `review`, `fix`/`approve` | Giữ được kiểm vết mà không phải tới 16 commit một chương |
 | D-13 | Final critic chỉ làm kiểm tra xuyên batch | Batch critic đã đọc từng chương |
 
@@ -48,7 +48,7 @@
 │   ├── rules/                   (Slice 2) port từ translation_skills/*.md của bản V1
 │   └── tests/fixtures + golden  HTML tổng hợp, KHÔNG chứa text truyện thật
 └── novel-books/
-    └── <book-id>/               ← mỗi truyện 1 repo DỮ LIỆU (remote: gcrypt::git@github.com:<user>/<book-id>-data.git)
+    └── <book-id>/               ← mỗi truyện 1 repo DỮ LIỆU (chỉ local; backup: Drive `My Drive/novel-backups/<book-id>/`)
         ├── book.yaml            url, adapter, ngôn ngữ, phạm vi chương
         ├── context/             characters.md, relationships.md, glossary.md, style-guide.md, continuity.md
         ├── chapters/NNN/        source.md, draft_v1.md, summary.md, semantic_review.md, language_review.md, draft_v2.md
@@ -64,6 +64,7 @@ Không bao giờ commit: `.env`, `browser-profile/`, `token.json`, `credentials.
 ```text
 /ingest   → code: tìm chương → tải (có cache HTML) → parse → kiểm tra → source.md
           → trạng thái mỗi chương VALID | SUSPECT | BLOCKED | FAILED → ingest-report.md → commit raw(...)
+          → đủ raw: `novel snapshot --stage raw` (tag raw-done, bundle + zip lên Drive)
 
 /translate-batch (theo nhóm 2–3 chương):
   translator           → draft_v1.md + summary.md (mỗi chương)          → commit translate(chNNN-MMM)
@@ -75,8 +76,10 @@ Không bao giờ commit: `.env`, `browser-profile/`, `token.json`, `credentials.
                          + semantic-critic chạy delta nếu editor sửa nghĩa
                        → approve | rework (≤2 lần) | NEEDS_HUMAN_REVIEW   → commit fix/approve(...)
   sau mỗi N chương: batch-critic đọc summary.md + glossary + đoạn bị gắn cờ, ghi rõ độ phủ → commit
+  sau mỗi batch: `novel snapshot --stage batch` (bundle lên Drive, giữ N bản mới nhất)
 
 /finalize → final-critic (xuyên batch) → sửa + regression → pandoc → epubcheck → export-manifest.json → commit
+          → `novel snapshot --stage final --epub <file>` (tag final, bundle + epub lên Drive)
 /status   → tính trạng thái từ artifact + git log; không ghi gì
 ```
 
@@ -163,6 +166,6 @@ Golden mô tả **hành vi mong muốn**, không phải chi tiết hiện thực
 ## 10. Việc mở và rủi ro còn lại
 
 - **Cần xác minh trong docs Claude Code:** subagent có gọi được subagent khác không (giả định là không, nên điều phối ở phiên chính); gọi 2 critic song song; payload của hook `SubagentStop` dùng để log agent thật; cách skill nhận tham số.
-- **Công cụ cần cài:** `gpg`, `git-remote-gcrypt`, `epubcheck` (Slice 5).
-- **Rủi ro mất khóa GPG** = mất bản sao trên GitHub. Lưu khóa trong trình quản lý mật khẩu, tách khỏi dữ liệu.
+- **Công cụ cần cài:** Google Drive for desktop (backup), `pandoc` + `epubcheck` (Slice 5). `gpg`/`git-remote-gcrypt` không còn cần sau khi sửa D-11.
+- **Backup chỉ tốt bằng lần snapshot gần nhất:** quên chạy `snapshot --stage batch` thì công dịch từ lần trước chỉ có ở local. Nội dung trên Drive không mã hóa.
 - Truyện dài 200+ chương có thể chạm usage limit; đo ở Slice 2 trước khi chạy cả bộ.

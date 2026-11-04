@@ -14,14 +14,14 @@ npm install
 npm test
 ```
 
-Công cụ ngoài (cài khi tới slice tương ứng): `gpg`, `git-remote-gcrypt` (repo dữ liệu mã hóa), `pandoc` + `epubcheck` (Slice 5). Adapter 69shuba dùng Google Chrome có sẵn trên máy (`channel: "chrome"`).
+Công cụ ngoài: Google Drive for desktop (backup qua `novel snapshot`), `pandoc` + `epubcheck` (Slice 5). Adapter 69shuba dùng Google Chrome có sẵn trên máy (`channel: "chrome"`).
 
 ## Hai repo
 
 | Repo | Nội dung | Remote |
 |---|---|---|
 | `novel-translator/` (repo này) | Code, agents, skills, rules, fixture tổng hợp | GitHub private |
-| `../novel-books/<book-id>/` | Raw, bản dịch, review, context của từng truyện | `gcrypt::` lên GitHub private (đã mã hóa) |
+| `../novel-books/<book-id>/` | Raw, bản dịch, review, context của từng truyện | Không có remote. Backup: `novel snapshot` → Google Drive `My Drive/novel-backups/<book-id>/` (không mã hóa) |
 
 ## Ingest (Slice 1)
 
@@ -32,7 +32,10 @@ npm run novel -- ingest ../novel-books/kzgd --from 5 --to 9 --recrawl
 npm run novel -- status ../novel-books/kzgd
 npm run novel -- import ../novel-books/kzgd --dir <thư-mục-raw-V1>      # nhập <n>.txt có sẵn
 npm run novel -- crosscheck ../novel-books/kzgd --v1-raw <thư-mục-raw-V1>
+npm run novel -- snapshot ../novel-books/kzgd --stage raw    # tag raw-done + bundle + zip → Drive
 ```
+
+Khôi phục từ Drive: `git clone <file>.bundle ../novel-books/kzgd` (đủ lịch sử và tag).
 
 - Kết quả: `chapters/NNN/source.md` (frontmatter có hash, parser fingerprint) và `ingest-report.md`. CLI **không** commit; bạn tự xem rồi commit repo dữ liệu.
 - 69shuba mở Google Chrome thật với profile trong `.cache/browser-profile/`. Gặp Cloudflare thì bạn tự xác minh trong cửa sổ đó (tool chờ tối đa 300s); `--headless` thì dừng với `BLOCKED`. Tool không tự vượt challenge.
@@ -40,4 +43,4 @@ npm run novel -- crosscheck ../novel-books/kzgd --v1-raw <thư-mục-raw-V1>
 - Mã thoát của `ingest`: 0 = ổn, 2 = có chương FAILED, 3 = BLOCKED.
 
 ## Trạng thái
-Slice 1 (ingest, TypeScript): code xong, golden + spec xanh. Còn chạy thật KZGD 1–201 và so hash với V1.
+Slice 1 (ingest, TypeScript): xong. KZGD 1–201 đã ingest, `content_hash` khớp V1 201/201.
