@@ -6,6 +6,7 @@
  * Port từ V1 `Shuba69Crawler` (crawler.py).
  */
 import * as cheerio from "cheerio";
+import { MIN_CONTENT_CHARS } from "../core/checks.js";
 import { charLength, directTextNodes, getTextStrip } from "../core/html.js";
 import { compileJunkPatterns, isJunk, type JunkPatternSpec } from "../core/junk.js";
 import { chapterNumberFromTitle } from "../core/numerals.js";
@@ -13,8 +14,6 @@ import { CrawlError, type RawChapter } from "../types.js";
 
 export const CONTENT_SELECTOR = ".txtnav";
 export const CATALOG_SELECTOR = ".catalog a[href*='/txt/']";
-/** CORE-14 */
-export const MIN_CONTENT_CHARS = 200;
 
 /** SHUBA-06: mẫu rác mặc định của 69shuba (port từ Shuba69Crawler.DEFAULT_JUNK_PATTERNS). */
 export const SHUBA69_JUNK: readonly JunkPatternSpec[] = [

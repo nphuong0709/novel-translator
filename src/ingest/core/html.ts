@@ -57,5 +57,35 @@ export function directTextNodes(sel: AnySelection): string[] {
     .flatMap((n: unknown) => (isTextNode(n) ? [n.data] : []));
 }
 
+/**
+ * Text thuộc **chính** phần tử này: gom text con cháu nhưng không đi vào phần tử con
+ * có tên trong `boundary` (mặc định `p`, `div`). Tương đương điều kiện
+ * `text.find_parent(["p", "div"]) is node` của V1.
+ *
+ * Dùng cho SHUKU-03: `<p>` cuối trang không đóng. `html.parser` của Python lồng khối
+ * phân trang vào trong `<p>`; parse5 (cheerio) thì tự đóng `<p>` khi gặp `<div>`.
+ * Hàm này cho cùng kết quả với cả hai cách lồng.
+ */
+export function ownText(sel: AnySelection, boundary: ReadonlySet<string> = new Set(["p", "div"])): string {
+  const parts: string[] = [];
+  const walk = (node: unknown, isRoot: boolean): void => {
+    if (isTextNode(node)) {
+      parts.push(node.data);
+      return;
+    }
+    const n = node as { name?: string; children?: unknown[] };
+    if (n.name !== undefined && (SKIP_TAGS.has(n.name) || (!isRoot && boundary.has(n.name)))) return;
+    for (const child of n.children ?? []) walk(child, false);
+  };
+  for (const el of sel.toArray()) walk(el, true);
+  return parts.join("");
+}
+
+/**
+ * Escape ký tự đặc biệt để nhúng chuỗi vào RegExp (như `re.escape`).
+ * Không escape `-` hay `/`: với cờ `u`, `\-` ngoài character class là lỗi cú pháp.
+ */
+export const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /** Số ký tự theo code point (giống `len()` của Python), không theo UTF-16. */
 export const charLength = (s: string): number => [...s].length;

@@ -17,7 +17,7 @@ const CHINESE_UNITS: ReadonlyMap<string, number> = new Map([
  * Không có cờ `g`, nên `exec` không giữ `lastIndex` giữa các lần gọi.
  * `\s` của JS khớp cả khoảng trắng Unicode (U+3000), giống `re` của Python 3.
  */
-const CHAPTER_NUMBER_RE = /第\s*([0-9０-９]+|[零〇一二两三四五六七八九十百千万]+)\s*章/u;
+export const CHAPTER_NUMBER_RE = /第\s*([0-9０-９]+|[零〇一二两三四五六七八九十百千万]+)\s*章/u;
 
 /**
  * CORE-01: số chữ Hán → number. Ví dụ "一百零五" → 105, "四一二" → 412.
