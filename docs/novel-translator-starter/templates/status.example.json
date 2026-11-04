@@ -1,0 +1,43 @@
+{
+  "book_id": "example-book",
+  "source_language": "zh",
+  "target_language": "vi",
+  "context": {
+    "version": 1,
+    "decision": "APPROVED",
+    "decided_by": "user",
+    "decided_at": "2026-11-04T10:00:00Z"
+  },
+  "chapters": {
+    "0001": {
+      "raw": "DONE",
+      "raw_hash": "<content_hash từ frontmatter raw>",
+      "batch": "b0001",
+      "translation": "DONE",
+      "review": "DONE",
+      "context_version": 1,
+      "versions": ["v1", "v2"],
+      "current_version": "v2",
+      "critic_verdict": "PASS",
+      "open_issues": [],
+      "approved_version": null
+    }
+  },
+  "batches": {
+    "b0001": {
+      "range": [1, 10],
+      "critic_verdict": "PASS",
+      "user_decision": "PENDING_USER_APPROVAL",
+      "decided_by": null,
+      "decided_at": null,
+      "rework_notes": null
+    }
+  },
+  "final": {
+    "status": "NOT_STARTED",
+    "critic_verdict": null,
+    "epub_path": null,
+    "epubcheck": null
+  },
+  "last_updated": "2026-11-04T10:00:00Z"
+}

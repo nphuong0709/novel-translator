@@ -1,6 +1,7 @@
 # Novel Translator — Blueprint V4
 
-> **Trạng thái:** Slice 1 xong (tag `slice-1`). B1 xong (`docs/capability-verification.md`). Đang chuẩn bị Slice 2 với kiến trúc 3 subagent (D-04, D-05, D-12, D-13, D-14, D-15 sửa/thêm ngày 2026-11-04).
+> **Trạng thái:** Slice 1 xong (tag `slice-1`). B1 xong (`docs/capability-verification.md`).
+> **⚠ Đề xuất thay thế (2026-11-04, chờ duyệt):** phần dịch, review, lưu trữ, backup (D-04…D-07, D-10…D-15; mục 3, 4, 5, 7, 9) được thay bằng `docs/novel_translation_framework_blueprint_simplified.md` (2 subagent, 3 command, không Git, không hook). Lý do: `docs/architecture-review-simplification.md`. Mục 2 (truy cập nguồn), 6 (ingest), 8 (golden) **vẫn hiệu lực**.
 > **Thay cho:** Blueprint V3 (bản review). Các mục không nhắc lại ở đây giữ nguyên tinh thần V3.
 > **Phạm vi:** công cụ cá nhân, chạy local bằng Claude Code; nguồn EN/ZH → tiếng Việt → EPUB.
 

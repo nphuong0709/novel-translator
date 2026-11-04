@@ -1,0 +1,16 @@
+{
+  "book_id": "example-book",
+  "title": "Example novel",
+  "source_language": "zh",
+  "target_language": "vi",
+  "source_type": "local-or-permitted-web",
+  "source_url": null,
+  "rights_confirmation": "user-confirmed authorized input; not verified by framework",
+  "chapter_count_expected": 10,
+  "chapter_ids": [
+    "0001",
+    "0002"
+  ],
+  "crawler_adapter": "local-files",
+  "source_hashes": {}
+}
