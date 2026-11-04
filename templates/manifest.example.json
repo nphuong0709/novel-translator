@@ -1,0 +1,40 @@
+{
+  "book_id": "example-book",
+  "title": "Example novel",
+  "source_language": "zh",
+  "target_language": "vi",
+  "source_url": "https://example.invalid/book/1.html",
+  "adapter": "shuku52",
+  "rights_confirmation": "user-confirmed authorized input; not verified by framework",
+  "chapter_count": 2,
+  "counts": { "VALID": 1, "SUSPECT": 1 },
+  "chapters": [
+    {
+      "id": "0001",
+      "number": 1,
+      "title": "第1章 …",
+      "url": "https://example.invalid/book/1_2.html",
+      "status": "VALID",
+      "issues": [],
+      "content_hash": "<sha256 hex, công thức V1>",
+      "source_chars": 4176,
+      "parser": "shuku52@2+junk:12b80a04",
+      "fetched_at": "2026-11-04T08:12:41.419Z",
+      "file": "raw/chapter-0001.md"
+    },
+    {
+      "id": "0002",
+      "number": 2,
+      "title": "第2章 …",
+      "url": "https://example.invalid/book/1_4.html",
+      "status": "SUSPECT",
+      "issues": ["Chương dài bất thường: …"],
+      "content_hash": "<sha256 hex>",
+      "source_chars": 10566,
+      "parser": "shuku52@2+junk:12b80a04",
+      "fetched_at": "2026-11-04T08:12:45.000Z",
+      "file": "raw/chapter-0002.md"
+    }
+  ],
+  "generated_at": "2026-11-04T08:50:03.837Z"
+}

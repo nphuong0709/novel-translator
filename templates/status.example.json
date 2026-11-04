@@ -11,6 +11,8 @@
   "chapters": {
     "0001": {
       "raw": "DONE",
+      "raw_status": "VALID",
+      "suspect_accepted": null,
       "raw_hash": "<content_hash từ frontmatter raw>",
       "batch": "b0001",
       "translation": "DONE",

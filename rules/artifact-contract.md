@@ -85,6 +85,7 @@ Schema: `templates/status.example.json`. Quy tắc ghi `status.json`:
 - Cập nhật `last_updated` (ISO-8601).
 - Ghi **sau mỗi chương** và **sau mỗi bước quan trọng** để có thể resume.
 - Chỉ đặt `APPROVED` khi **người dùng gõ** lệnh `approve` hoặc `approve-context`. Ghi `decided_by: "user"` cùng `decided_at`.
+- `raw_status` sao chép trạng thái nguồn trong manifest (`VALID | SUSPECT`). Chương `SUSPECT` chỉ được dịch khi `suspect_accepted` có giá trị `{ "by": "user", "at": "<ISO>", "note": "…" }`. Hỏi người dùng **một lần**, rồi ghi lại để không hỏi lại.
 
 ## 5. Fingerprint (resume và phát hiện cũ)
 

@@ -28,7 +28,7 @@ Lệnh `approve*` **chỉ** chạy khi chính người dùng gõ trong tin nhắ
 ## 1. Chuẩn bị
 
 1. In lại cách hiểu: book, phạm vi, batch-size (mặc định 10), có phải đang resume không.
-2. **Raw:** mọi chương trong phạm vi phải có `raw = DONE`. Chương `SUSPECT` phải có xác nhận của người dùng (hỏi nếu chưa có); `FAILED`, `BLOCKED` hay thiếu thì **dừng** và liệt kê. Không bịa nội dung thiếu.
+2. **Raw:** mọi chương trong phạm vi phải có `raw = DONE`. Chương `raw_status = SUSPECT` phải có `suspect_accepted` (contract mục 4). Chưa có thì hỏi người dùng một lần, kèm lý do SUSPECT trong manifest và `reviews/ingest-review.md` nếu có; đồng ý thì ghi lại. `FAILED`, `BLOCKED` hay thiếu thì **dừng** và liệt kê. Không bịa nội dung thiếu.
 3. **Không dồn việc:** có batch khác đang `PENDING_USER_APPROVAL` hoặc `NEEDS_REWORK` thì dừng và nhắc người dùng xử lý batch đó trước (trừ khi phạm vi trùng đúng batch đó, tức đang làm lại).
 4. **Model:** mặc định theo frontmatter agent (Opus · medium). `book.yaml` có `models.translator` / `models.critic` thì truyền `model` và `effort` khi gọi agent.
 5. **Chia batch** theo contract mục 1. Chỉ xử lý **batch đầu tiên chưa `APPROVED`** trong phạm vi. Sau batch đó thì dừng (mục 5), kể cả khi phạm vi còn chương.
