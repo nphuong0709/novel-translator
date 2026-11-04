@@ -1,0 +1,28 @@
+# Dependencies & build
+node_modules/
+dist/
+coverage/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+token.json
+credentials.json
+*.pem
+*.key
+
+# Browser profiles & caches (contain cookies / login data)
+.cache/
+browser-profile/
+**/browser-profile/
+
+# Book data lives in a separate encrypted repo (novel-books/<id>), never here
+books/
+novel-books/
+*.epub
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

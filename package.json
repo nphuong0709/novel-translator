@@ -1,0 +1,26 @@
+{
+  "name": "novel-translator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local, skill-driven EN/ZH → Vietnamese novel translation framework (Claude Code)",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "bin": { "novel": "./dist/cli.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:golden": "vitest run tests/golden.*.test.ts",
+    "novel": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

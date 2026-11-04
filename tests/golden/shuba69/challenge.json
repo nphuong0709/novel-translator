@@ -1,0 +1,5 @@
+{
+  "_note": "hand-written: rule = title chứa 'just a moment'/'security verification' HOẶC text 'Verify you are human'",
+  "is_challenge": true,
+  "expected_status_headless": "BLOCKED"
+}
