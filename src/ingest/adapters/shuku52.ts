@@ -2,7 +2,13 @@ import type { JunkPatternSpec } from "../core/junk.js";
 import type { Fetcher, RawChapter } from "../types.js";
 
 /** SHUKU-04: mẫu rác mặc định của 52shuku. */
-export const SHUKU52_JUNK: readonly JunkPatternSpec[] = [];
+export const SHUKU52_JUNK: readonly JunkPatternSpec[] = [
+  { pattern: String.raw`52\s*书库` },
+  // V1: r"(?i)52\s*shuku", CORE-04: cờ inline chuyển sang `flags`.
+  { pattern: String.raw`52\s*shuku`, flags: "i" },
+  { pattern: String.raw`^(?:上一页|下一页|目录|返回目录)$` },
+  { pattern: String.raw`^传送门[：:]` },
+];
 
 /** SHUKU-01 */
 export function normalizeIndexUrl(bookUrl: string): string {
