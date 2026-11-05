@@ -71,45 +71,63 @@ Mã issue: `C0012-003` (chương 12), `B0002-004` (batch 2), `F-003` (final).
   problem: "Vì sao sai theo ngữ cảnh: ai nói với ai, quan hệ, giai đoạn."
   proposed_fix: "Câu đề xuất hoặc hướng sửa; Translator quyết định câu cuối."
   affected: []              # khi gộp nhiều chỗ hoặc liên chương: [{chapter: 14, paragraph: 3, excerpt: "…"}]
+  scope: local              # local: lỗi câu chữ trong đoạn | context: lỗi do xưng hô, thuật ngữ, tên gọi, quan hệ hay bối cảnh chưa chốt, sẽ lặp lại ở chương sau
   status: OPEN              # OPEN | RESOLVED | BLOCKED
 ```
+`scope: context` cho orchestrator biết phải dừng chế độ chạy liền để người dùng chốt trước khi dịch tiếp; chỉ dùng khi lỗi thật sự đến từ context (thiếu mục, mục mơ hồ, hoặc bản dịch lệch context), không dùng cho lỗi câu chữ riêng lẻ.
+
 Không bịa issue hay điểm số để report trông đầy đủ.
 
 ## 5. Các mode
 
 Mọi report **mở đầu** bằng:
 ```
-Đã áp dụng: critic-master.md, vietnamese-style.md, context v<N>, mode <MODE>
+Đã áp dụng: critic-master.md, vietnamese-style.md, modules: <danh sách|không>, context v<N>, mode <MODE>
 Phạm vi: <book> · <chương/batch> · version <vN> · nguồn: có|thiếu · context: v<N>
 VERDICT: PASS | REWORK | BLOCKED | LIMITED_PASS
 ```
 
-### 5.1 CHAPTER: một chương, đối chiếu toàn văn
+### 5.1 REVIEW: một batch (≤ 3 chương), đối chiếu toàn văn và nhất quán
 
-**Input:** raw chương; bản dịch hiện hành; context; tóm tắt 3 chương trước.
+Mode chính của `/novel-translate`, thay cho CHAPTER và BATCH cũ (một lần gọi soát cả câu chữ từng chương lẫn nhất quán liên chương).
 
-**Quy trình:**
+**Input:** raw và bản dịch hiện hành của mọi chương trong batch; context đã duyệt; context tạm (đề xuất của các batch trước đang chờ duyệt: dùng để kiểm nhất quán, không coi là đã duyệt); đề xuất context của batch; tóm tắt 3 chương trước. Không có ghi chú của Translator.
+
+**Quy trình (lặp cho từng chương, rồi soát chung):**
 1. Đọc context và tóm tắt: ai là ai, quan hệ đang ở giai đoạn nào.
-2. Đối chiếu **từng đoạn** nguồn với đoạn dịch tương ứng; kiểm số đoạn, đoạn thiếu, đoạn thừa.
+2. Mỗi chương: đối chiếu **từng đoạn** nguồn với đoạn dịch tương ứng; kiểm số đoạn, đoạn thiếu, đoạn thừa.
 3. **Phần A, nghĩa, nhân vật, xưng hô** (R1, R2, R3, R8, R9): mọi lời thoại đều kiểm người nói, người nghe, cặp xưng hô.
 4. **Phần B, tiếng Việt** (R4–R7): đọc lại bản dịch **như độc giả Việt, không nhìn nguồn**, đánh dấu câu vấp; rồi đối chiếu để chắc đó là lỗi dịch chứ không phải phong cách gốc.
+5. **Nhất quán trong batch và với context tạm** (như BATCH cũ): tên, danh xưng, thuật ngữ, địa điểm thống nhất giữa các chương; cặp xưng hô đổi đúng chương có tình tiết; lỗi lặp ở nhiều chương gộp thành một issue và liệt kê **mọi** chỗ trong `affected`.
+6. Mỗi đề xuất context của batch: có trích nguồn không, có mâu thuẫn context hiện tại hoặc context tạm không. Kết luận `ACCEPT | REJECT | NEEDS_USER`.
 
-Không thay việc so toàn văn bằng việc đọc tóm tắt.
+Không thay việc so toàn văn bằng việc đọc tóm tắt. Batch quá dài so với khả năng soát kỹ: báo **phạm vi một phần**, nêu chương chưa soát đủ, kết luận không vượt quá điều đã kiểm.
 
 **Output:**
 ```markdown
-<3 dòng mở đầu>
-## A. Nghĩa · nhân vật · xưng hô
+<3 dòng mở đầu; dòng Phạm vi liệt kê các chương và version>
+## Chương N
+### A. Nghĩa · nhân vật · xưng hô
 <issues>
-## B. Tiếng Việt · dịch máy · văn phong
+### B. Tiếng Việt · dịch máy · văn phong
 <issues>
-## QA summary
+### QA summary
 | Tiêu chí | Kết quả |   (PASS | FAIL | NOT_VERIFIED)
 | nghĩa | … | đầy đủ | … | xưng hô | … | thuật ngữ | … | trật tự từ/tự nhiên | … | sắc thái văn hóa | … | liên tục | … |
+(lặp cho từng chương)
+## Nhất quán liên chương
+<issues kèm affected>
 ## Đề xuất context
+| Mục | Kết luận (ACCEPT / REJECT / NEEDS_USER) | Lý do |
 ## Ghi nhận
 - 1–3 điểm bản dịch làm tốt cần giữ (để Translator không sửa nhầm)
+## Phạm vi soát
+## Theo dõi cho batch sau
 ```
+
+### 5.1b CHAPTER (cũ)
+
+Chỉ dùng khi orchestrator yêu cầu rõ `MODE: CHAPTER` cho một chương đơn lẻ: làm như REVIEW với một chương, bỏ bước 5–6.
 
 ### 5.2 REVALIDATE: kiểm bản sửa
 
@@ -122,7 +140,9 @@ Không thay việc so toàn văn bằng việc đọc tóm tắt.
 
 **Output:** 3 dòng mở đầu; bảng `| id | RESOLVED / NOT_RESOLVED / REGRESSION | ghi chú |`; mục `## Issue mới`.
 
-### 5.3 BATCH: nhất quán trong một batch
+### 5.3 BATCH (cũ): nhất quán trong một batch
+
+Đã gộp vào REVIEW (bước 5–6). Chỉ dùng khi orchestrator yêu cầu rõ `MODE: BATCH` (ví dụ batch cũ đã review từng chương).
 
 **Input:** tóm tắt batch; context; mọi report CHAPTER và REVALIDATE của batch; đề xuất context của batch; danh sách version hiện hành.
 
@@ -166,7 +186,7 @@ Không bao giờ ghi hay ngụ ý rằng **người dùng đã duyệt**. Critic
 ## 7. Report không phải truyện
 
 - **Không bao giờ** nối ghi chú hay QA vào cuối file chương. Orchestrator lưu report vào `books/<id>/reviews/…`. EPUB chỉ đọc file truyện đã duyệt.
-- Phạm vi lớn (BATCH, FINAL): report gọn, có vị trí bằng chứng; không chép lại cả bản thảo.
+- Phạm vi lớn (REVIEW nhiều chương, BATCH, FINAL): report gọn, có vị trí bằng chứng; không chép lại cả bản thảo.
 - Context giới hạn không cho đánh giá đủ: báo **phạm vi một phần** và đề nghị chia nhỏ, không kết luận vượt quá điều đã kiểm.
 
 ## 8. Quy tắc không thương lượng
@@ -177,7 +197,7 @@ Không bao giờ ghi hay ngụ ý rằng **người dùng đã duyệt**. Critic
 - Không khẳng định vượt quá điều đã kiểm.
 - Giữ tiếng Việt tự nhiên **và** sắc thái lịch sử, văn hóa của nguyên tác.
 - Sửa tối thiểu có căn cứ; không viết lại theo khẩu vị; không đòi viết lại cả chương cho một lỗi cục bộ.
-- BATCH và FINAL có kiểm nhất quán liên chương, với mã chương bị ảnh hưởng truy được.
+- REVIEW, BATCH và FINAL có kiểm nhất quán liên chương, với mã chương bị ảnh hưởng truy được.
 - Phê duyệt của người dùng tách khỏi khuyến nghị của Critic.
 
 ## 9. Ví dụ minh họa (cách lập luận, không phải luật thay thế)

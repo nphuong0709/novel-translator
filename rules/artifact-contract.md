@@ -6,7 +6,7 @@ Dùng chung cho `/novel-crawl`, `/novel-translate`, `/novel-finalize`. Mọi đ�
 
 ```text
 books/<book-id>/
-├── book.yaml                    # cấu hình do người dùng sửa: url, adapter, ngôn ngữ, genre, title_vi, author, models (tùy chọn)
+├── book.yaml                    # url, adapter, ngôn ngữ, genre (tên module trong prompts/modules/, chuỗi hoặc danh sách; none = không module; approve-context ghi nếu thiếu), title_vi, author, models (tùy chọn)
 ├── manifest.json                # do crawler sinh: danh sách chương, tiêu đề gốc, hash, trạng thái nguồn
 ├── status.json                  # tiến độ, checkpoint, phê duyệt (main ghi; xem mục 4)
 ├── raw/chapter-0001.md          # nguyên tác do crawler ghi. KHÔNG BAO GIỜ sửa khi dịch/review/finalize
@@ -19,21 +19,24 @@ books/<book-id>/
 │       ├── initial/             # context lần đầu: characters.md, relationships.md, glossary.md, style-notes.md
 │       └── b0001.md             # đề xuất cập nhật context của batch b0001
 ├── translated/
-│   ├── chapter-0001.v1.md       # bản dịch đầu (chỉ nội dung truyện)
-│   └── chapter-0001.v2.md       # bản sửa (mỗi lần sửa là một version mới; không ghi đè version cũ)
+│   ├── chapter-0001.v1.md       # bản NHÁP của translator (chỉ nội dung truyện); bất biến kể từ khi Editor bắt đầu
+│   ├── chapter-0001.v2.md       # bản SAU BIÊN TẬP: `novel edit-prep` sao chép v1, literary-editor sửa cục bộ trên bản sao
+│   ├── chapter-0001.v3.md       # (nếu có) rework / REDRAFT / sửa ở FINAL; mỗi lần sửa là một version mới, không ghi đè version cũ
+│   └── .history/                # version không được duyệt, chuyển vào khi batch được approve (không xóa)
 ├── reviews/
 │   ├── ingestion.md             # báo cáo crawl
 │   ├── b0001/
 │   │   ├── summaries.md              # tóm tắt chương của batch (translator viết; gộp vào continuity khi duyệt)
-│   │   ├── critic-chapter-0001.md    # CHAPTER review của v1
-│   │   ├── revalidate-chapter-0001.md
-│   │   ├── critic-batch.md
-│   │   ├── revalidate-batch.md
-│   │   ├── notes.md                  # [Chú thích], [Thuật ngữ mới], [Cần xác nhận] của translator
+│   │   ├── editor-batch.md           # REVIEW_EDIT cả batch (≤3 chương): phát hiện + change log + post-edit check + VERDICT (Editor ghi)
+│   │   ├── editor-rework.md          # (nếu có) REWORK theo ghi chú người dùng; vòng sau: editor-rework-2.md
+│   │   ├── editor-redraft.md         # (nếu có) review lại chương REDRAFT
+│   │   ├── edit-guard.json           # hash các file Editor không được đổi (`novel edit-prep`), dùng cho `novel edit-check`
+│   │   ├── critic-batch.md, revalidate-batch.md, critic-chapter-0001.md   # (cũ, trước D-16) report của Critic chỉ đọc
+│   │   ├── notes.md                  # [Chú thích], [Thuật ngữ mới], [Cần xác nhận] của translator (cho người dùng đọc; không làm input cho agent)
 │   │   └── user-decision.md          # phê duyệt / yêu cầu sửa của người dùng
 │   └── final/
-│       ├── critic-final.md
-│       └── revalidate-final.md
+│       ├── editor-final.md           # FINAL review
+│       └── editor-final-edit.md      # (nếu có) sửa ở FINAL
 └── output/
     ├── <book-id>.epub           # bản cuối (chỉ /novel-finalize)
     ├── <book-id>.draft.epub     # bản đọc thử (theo yêu cầu, ở cuối batch hoặc finalize --draft)
@@ -41,7 +44,9 @@ books/<book-id>/
 ```
 
 - Mã chương luôn có **4 chữ số** (`0001`). Mã batch: `b` + 4 chữ số của thứ tự batch.
-- Phạm vi batch: chia phạm vi được yêu cầu thành các đoạn liên tiếp, mỗi đoạn `batch-size` chương (mặc định 10). Batch đã ghi trong `status.json` thì giữ nguyên phạm vi cũ.
+- Phạm vi batch: chia phạm vi được yêu cầu thành các đoạn liên tiếp, mỗi đoạn `batch-size` chương (mặc định **3**, tối đa 3: một lần gọi translator và một lần gọi literary-editor cho cả batch). Batch đã ghi trong `status.json` thì giữ nguyên phạm vi cũ.
+- `--auto`: chạy liền nhiều batch, mỗi batch dừng ở `PENDING_USER_APPROVAL`; người dùng duyệt sau, có thể duyệt gộp `approve <id> bNNNN-bMMMM`.
+- **Context tạm:** `context/proposals/<b>.md` của các batch trước đang `PENDING_USER_APPROVAL` được đưa cho translator và literary-editor để giữ nhất quán. Đây không phải context đã duyệt (bất biến 10 vẫn giữ); ưu tiên: context đã duyệt > quyết định của người dùng > đề xuất chưa duyệt.
 
 ## 2. Định dạng file chương
 
@@ -62,13 +67,13 @@ books/<book-id>/
 ## 3. Bất biến (không thương lượng)
 
 1. Raw không bị sửa bởi translate, review hay finalize.
-2. Review report là file khác với bản dịch. Critic chạy như một subagent **chỉ đọc**; main lưu report mà Critic trả về.
-3. Phê duyệt của người dùng tách khỏi kết luận của Critic. **Không bao giờ** chuyển `PASS` của Critic thành `APPROVED`.
+2. Review report là file khác với bản dịch. Literary-editor chỉ được ghi **file version đích** và **file report** được giao. Bản nháp (v1), mọi version cũ, raw và context là chỉ đọc đối với nó. `novel edit-check` kiểm bằng hash; vi phạm thì lượt biên tập bị loại.
+3. Phê duyệt của người dùng tách khỏi kết luận của Editor. **Không bao giờ** chuyển `PASS` của Editor thành `APPROVED`. Bản đã được Editor sửa **chưa** phải bản đã duyệt.
 4. Không tự nối các command: crawl xong không tự dịch; dịch xong không tự finalize.
 5. Hoàn tất hoặc đánh dấu rõ bị gián đoạn ở bước hiện tại rồi mới sang bước kế.
 6. Resume chỉ bỏ qua artifact có fingerprint khớp (mục 5). Không có fingerprint thì phải kiểm tra, không bỏ qua mù quáng.
 7. EPUB chỉ chứa các file truyện đúng thứ tự, đúng version được duyệt; không bao giờ chứa notes, prompt, report hay context.
-8. Không ghi đè hàng loạt; mỗi lần sửa tạo version mới; ghi file tạm rồi đổi tên khi có thể.
+8. Không ghi đè hàng loạt; mỗi lần sửa tạo version mới; ghi file tạm rồi đổi tên khi có thể. Khi batch được người dùng `approve`, các version khác `approved_version` được chuyển sang `translated/.history/` (lưu trữ, không xóa); trước khi approve, mọi version giữ trong `translated/` để người dùng so bản nháp với bản sau biên tập. Version hỏng hoặc dở dang chuyển sang `.history/` với hậu tố `.partial`, `.invalid`, `.broken`, `.redraft-source` (không xóa).
 9. Không có thao tác Git trong workflow.
 10. Context đã duyệt chỉ đổi khi người dùng duyệt đề xuất (`approve-context` hoặc `approve` batch).
 
@@ -77,7 +82,7 @@ books/<book-id>/
 | Đối tượng | Giá trị |
 |---|---|
 | Bước của chương (`raw`, `translation`, `review`) | `NOT_STARTED`, `IN_PROGRESS`, `DONE`, `BLOCKED`, `FAILED` |
-| Kết luận Critic | `PASS`, `REWORK`, `BLOCKED`, `LIMITED_PASS` |
+| Kết luận Editor (`editor_verdict`; batch cũ: `critic_verdict`) | `PASS`, `REWORK`, `BLOCKED`, `LIMITED_PASS`; chương có thể là `REDRAFT`; FINAL: `READY`, `NEEDS_REWORK` |
 | Quyết định của người dùng (batch, context) | `PENDING_USER_APPROVAL`, `APPROVED`, `NEEDS_REWORK`, `BLOCKED` |
 
 Schema: `templates/status.example.json`. Quy tắc ghi `status.json`:
@@ -103,20 +108,34 @@ Schema: `templates/status.example.json`. Quy tắc ghi `status.json`:
 | Tiêu đề | dòng 1 bắt đầu bằng `# ` | đúng |
 | Hash raw không đổi | so `content_hash` với `status.json` | bằng nhau |
 
-## 7. Chính sách sửa
+**Sau mỗi lần gọi literary-editor:** `npm run -s novel -- edit-check books/<id> --batch <b> --report <reviews/...md>` (mã 0 = PASS, 2 = FAIL). Lệnh kiểm:
+- hash của raw, mọi version cũ, `context/**`, summaries và notes không đổi;
+- các kiểm tra ở bảng trên cho version đích;
+- tập đoạn khác nhau giữa version trước và sau **trùng** tập đoạn trong `## Change log`;
+- report có `Đã áp dụng:`, `VERDICT:`, `## Change log`, `## Post-edit Source Fidelity Check`.
 
-- `CRITICAL`, `MAJOR`: **bắt buộc** sửa và revalidate.
-- `MINOR`: sửa khi cùng chương đã có lượt FIX, hoặc khi Critic Batch nêu nó lặp lại ở nhiều chương; nếu không thì ghi nhận.
-- `SUGGESTION`: không sửa.
-- Mỗi chương hoặc batch: tối đa **2 lượt FIX → REVALIDATE**. Vẫn còn `CRITICAL`/`MAJOR` thì chuyển `NEEDS_REWORK` cho người dùng, không lặp tiếp.
+Cảnh báo (`WARN`, không chặn) khi:
+- sửa trên 30% số đoạn mà không ghi `REDRAFT`;
+- change ID trỏ tới đoạn không đổi.
 
-## 8. Phạm vi của Critic theo mode
+**Sau mỗi lần gọi agent:** `npm run -s novel -- agent-check books/<id> --agent <id> [--model opus|sonnet]` kiểm model thật và việc agent chạy foreground.
 
-| Mode | Input | Ghi chú |
+## 7. Chính sách sửa (literary-editor; chi tiết: `prompts/literary-editor-master.md` §6)
+
+- `CRITICAL`, `MAJOR` (`CONFIRMED`): Editor **bắt buộc** sửa ngay trong lần gọi, rồi tự kiểm theo nguồn (bước 8).
+- `MINOR`: sửa khi chắc chắn và có căn cứ.
+- `SUGGESTION`, `NEEDS_CONTEXT`: không sửa.
+- Mỗi thay đổi có căn cứ: nguyên tác, context đã duyệt hoặc quyết định của người dùng, hoặc quy tắc có định danh. Chỉ sửa cục bộ; không tách, gộp đoạn; không viết lại cả chương.
+- **REDRAFT** (người dùng duyệt 2026-11-05): trên 30% số đoạn cần sửa, hoặc có từ 5 lỗi `CRITICAL` về nghĩa trở lên, hoặc lỗi cấu trúc toàn chương. Khi đó translator dịch lại **một lần**, Editor review lại; vẫn không đạt thì `REWORK` cho người dùng.
+- Translator **không** được gọi để sửa lỗi cục bộ.
+- `edit-check` FAIL (trừ trường hợp file được bảo vệ bị đổi): làm lại lượt biên tập **một lần**; vẫn FAIL thì `BLOCKED`.
+
+## 8. Phạm vi của literary-editor theo mode
+
+| Mode | Input | Ghi được |
 |---|---|---|
-| CHAPTER | raw + bản dịch hiện hành của 1 chương + context + tóm tắt 3 chương trước | So từng đoạn |
-| REVALIDATE | issue gốc + đoạn trước/sau khi sửa + đoạn nguyên tác tương ứng | Chỉ các đoạn đã đổi |
-| BATCH | tóm tắt batch + context + mọi report của batch + `proposals/bNNNN.md` | Đọc toàn văn đoạn liên quan khi nghi mâu thuẫn; không soát lại câu chữ từng chương |
-| FINAL | continuity toàn phạm vi + context + mọi `critic-batch.md` + issue còn mở + đoạn mẫu | Ghi rõ phần soát đầy đủ và phần chỉ soát mẫu |
+| REVIEW_EDIT | raw + bản làm việc (bản sao của v1) của mọi chương trong batch (≤3) + kết quả kiểm tra cấu trúc + context + context tạm + `proposals/bNNNN.md` + tóm tắt 3 chương trước | bản làm việc; `editor-batch.md` |
+| REWORK | ghi chú người dùng + bản làm việc (bản sao của `current_version`) + raw + report trước + context (+ bản nháp nếu `revert`) | bản làm việc; `editor-rework.md` |
+| FINAL | continuity toàn phạm vi + context + mọi `editor-batch.md` (batch cũ: `critic-batch.md`) + issue còn mở + đoạn mẫu; lượt sửa: thêm bản làm việc của chương bị nêu | `editor-final.md`; lượt sửa: bản làm việc và `editor-final-edit.md` |
 
-Không khẳng định đã soát toàn văn khi chỉ đọc tóm tắt.
+Không khẳng định đã soát toàn văn khi chỉ đọc tóm tắt. Không nhận `notes.md` của translator.

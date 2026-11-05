@@ -14,19 +14,23 @@ Thiết kế: `docs/novel_translation_framework_blueprint_simplified.md` (thay p
 
 ## Workflow dịch (skills)
 - Chỉ ba skill chính, **do người dùng gọi**: `/novel-crawl`, `/novel-translate`, `/novel-finalize`. Không bao giờ tự nối chúng với nhau.
-- Hai subagent: `translator`, `critic`. Phiên main điều phối; `critic` chỉ đọc và độc lập với `translator`. Chỉ gọi agent ở **foreground** (`run_in_background: false`), chờ xong mới sang bước sau. Subagent không được gọi subagent khác.
+- Hai subagent (blueprint D-16):
+  - `translator`: Sonnet; dịch bản nháp. Riêng `CONTEXT_INIT` gọi bằng Opus.
+  - `literary-editor`: Opus; độc lập với `translator`, review và sửa cục bộ có căn cứ trên bản sao. Không bao giờ sửa raw, bản nháp v1, context đã duyệt; `novel edit-check` kiểm bằng hash.
+  - Phiên main điều phối. Chỉ gọi agent ở **foreground** (`run_in_background: false`), chờ xong mới sang bước sau, rồi chạy `novel agent-check`. Subagent không được gọi subagent khác.
+  - `critic` (chỉ đọc) là agent **tạm** cho pilot T5, không thuộc workflow; xóa sau pilot.
 - **Không có thao tác Git trong workflow dữ liệu:** không commit, stage, push hay sửa `.gitignore` như một bước của workflow.
 - Chỉ file local: không UI, DB, chi tiêu API key, upload cloud hay chạy nền ngầm.
 - Giữ nguyên nguồn. Bản dịch, review, context và ấn phẩm là các file tách biệt (`rules/artifact-contract.md`).
-- Khuyến nghị của Critic **không phải** phê duyệt của người dùng. Mặc định dừng sau mỗi batch. Chỉ đặt `APPROVED` khi người dùng gõ lệnh `approve`.
+- Kết luận và bản sửa của Editor **không phải** phê duyệt của người dùng. Không gọi lại translator để sửa lỗi cục bộ mà Editor sửa được. Batch tối đa 3 chương. Mặc định dừng sau mỗi batch; chỉ khi người dùng gõ `--auto` mới chạy liền nhiều batch (vẫn không tự duyệt). Chỉ đặt `APPROVED` khi người dùng gõ lệnh `approve`.
 - Không bao giờ đưa bình luận, ghi chú, bảng QA hay report vào file truyện hoặc EPUB.
 - Không tự rút gọn hay thay thế các master prompt khi gọi agent.
 - Thiếu script hoặc lệnh cần thiết: báo `NOT_IMPLEMENTED`, không giả vờ đã xong.
 
 ## Nguồn sự thật
 - Workflow: `.claude/skills/{novel-crawl,novel-translate,novel-finalize}/SKILL.md`
-- Translator: `prompts/translation-master.md` (V1, nguyên văn), `prompts/translation-workflow.md`, `prompts/vietnamese-style.md`, `prompts/modules/*`
-- Critic: `prompts/critic-master.md`, `prompts/vietnamese-style.md`
+- Translator: `prompts/translation-master.md` (tầng 1, luật chung mọi thể loại), `prompts/modules/<genre>.md` (tầng 2, nạp theo `book.yaml → genre`), `prompts/translation-workflow.md`, `prompts/vietnamese-style.md`. Context của truyện là tầng 3 (master §12). Phần riêng thể loại viết vào module, không viết vào master.
+- Literary Editor: `prompts/literary-editor-master.md`, `prompts/translation-master.md`, `prompts/vietnamese-style.md`, module. (Pilot: `critic` dùng `prompts/critic-master.md`.)
 - Artifact, trạng thái, kiểm tra: `rules/artifact-contract.md`, `templates/status.example.json`; EPUB: `rules/epub-export.md`
 
 ## Lệnh phát triển
@@ -34,12 +38,13 @@ Thiết kế: `docs/novel_translation_framework_blueprint_simplified.md` (thay p
 npm test            # toàn bộ test
 npm run test:golden # chỉ golden test (port từ V1)
 npm run typecheck
-npm run novel -- <lệnh>   # CLI qua tsx: init | ingest | import | status | crosscheck (help để xem cú pháp)
+npm run novel -- <lệnh>   # CLI qua tsx: init | ingest | import | status | crosscheck | save-report | edit-prep | edit-check | agent-check (help để xem cú pháp)
 ```
 
 ## Trạng thái
 - Slice 1 (crawler TS) xong; layout skill (`raw/chapter-NNNN.md`, `manifest.json`, `reviews/ingestion.md`) xong. KZGD ở `books/kzgd/`.
-- Tiếp theo: T2, chạy thử `/novel-translate` 1–2 chương (dừng ở `approve-context`).
+- Đã chạy b0001–b0003 (ch1–8) theo mô hình Critic cũ, đang chờ duyệt.
+- Slice T5 (Translator Sonnet → Literary Editor Opus, D-16) đã cài prompt, agent, skill, contract và `novel edit-prep | edit-check | agent-check`. Tiếp theo: pilot theo `docs/pilot-t5.md`.
 - Còn tồn tại từ thiết kế cũ, chưa dùng trong workflow: `src/snapshot.ts` (git bundle; sẽ thay bằng backup zip ở T4).
 
 Bản đồ code:

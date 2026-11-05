@@ -1,7 +1,9 @@
 # Translation Workflow Addendum — dùng kèm `translation-master.md`
 
-> `translation-master.md` là **bộ luật dịch** (bản V1, giữ nguyên văn). File này chỉ quy định **cách làm việc trong framework**: ghi file thay vì trả lời chat, mode FIX, đoạn 1:1, ghi chú tách khỏi truyện.
-> **Ghi đè có giới hạn:** chỉ các mục ở bảng 1 thay thế nội dung tương ứng của master. Mọi quy tắc dịch khác của master (xưng hô, tên riêng, thơ, đơn vị, nội dung nhạy cảm…) giữ nguyên hiệu lực.
+> `translation-master.md` là **luật dịch chung** (tầng 1); `prompts/modules/<genre>.md` là luật theo thể loại (tầng 2); `books/<id>/context/` là luật của truyện (tầng 3). Xem master §12.
+> File này chỉ quy định **cách làm việc trong framework**: ghi file thay vì trả lời chat, mode REDRAFT, đoạn 1:1, ghi chú tách khỏi truyện.
+> Lỗi cục bộ sau review do **Literary Editor** sửa trực tiếp (blueprint D-16). Translator không còn mode FIX.
+> **Ghi đè có giới hạn:** chỉ các mục ở bảng 1 thay thế nội dung tương ứng của master. Mọi quy tắc dịch khác của master và module giữ nguyên hiệu lực.
 
 ---
 
@@ -9,15 +11,13 @@
 
 | Master | Trong framework |
 |---|---|
-| Đầu file: "dán làm System Prompt…", Phụ lục A/B/C là mẫu | Glossary, bảng xưng hô, ghi chú riêng của truyện nằm ở `books/<id>/context/`. Phụ lục của master chỉ là **mẫu tham khảo**, không phải context của truyện đang dịch |
 | §3.4: "Một đoạn gốc → một đoạn dịch (trừ khi tách/gộp là bắt buộc…)" | **Luôn 1:1 theo đoạn.** Được tách hoặc ghép **câu** trong cùng một đoạn, không tách hoặc gộp **đoạn**. Dấu ngắt cảnh (`***`, `---`, `◇`…) là một đoạn riêng, giữ nguyên ký hiệu |
 | §4.3, §8: `[Chú thích: …]` "ở cuối" | Ghi vào file **notes** được giao (`reviews/<batch>/notes.md`, mục `## Chương N`), **không** ghi vào file truyện *(mặc định; người dùng có thể đổi để chú thích vào EPUB)* |
 | §10.1: hậu kỳ sau `---` ở cuối bản dịch | `[Chú thích]`, `[Thuật ngữ mới]`, `[Cần xác nhận]` đều ghi vào file **notes**. Đề xuất thuật ngữ, nhân vật, xưng hô **cũng** ghi vào file **proposals** (mục 4) |
-| §14: "Người dùng yêu cầu sửa bản dịch cũ…" | Chỉ sửa qua mode FIX (mục 5), theo issue có bằng chứng |
+| §14: "Người dùng yêu cầu sửa bản dịch cũ…" | Translator không sửa bản dịch cũ. Sửa cục bộ do Literary Editor làm (mode REWORK). Translator chỉ dịch lại cả chương ở mode REDRAFT (mục 5) |
 | §16: "Trả về DUY NHẤT bản dịch" | Bản dịch **ghi vào file** được giao. Câu trả lời trong chat chỉ là báo cáo ngắn theo mẫu của agent `translator` |
-| §12.1: truyện hiện đại (ngắn) | Áp dụng §12.1 và mục 6 của file này khi `genre` là hiện đại, đô thị, tận thế. **Không** mặc định giọng cổ trang Hán-Việt cho truyện hiện đại |
 
-Module thể loại (ví dụ `modules/eastern-ancient.md`) cấm "tự thêm chú thích, ghi chú người dịch". Lệnh cấm này áp dụng cho **file truyện**. File notes là kênh duy nhất cho các ghi chú cần thiết theo §10.1.
+Mọi lệnh cấm "tự thêm chú thích, ghi chú người dịch" (trong master hay module) áp dụng cho **file truyện**. File notes là kênh duy nhất cho các ghi chú cần thiết theo §10.1.
 
 ## 2. Trinh sát nguồn (nội bộ, trước khi dịch)
 
@@ -26,7 +26,9 @@ Module thể loại (ví dụ `modules/eastern-ancient.md`) cấm "tự thêm ch
 3. Đọc `characters.md`, `relationships.md` (đúng **phạm vi chương** hiện tại), `glossary.md`, và tóm tắt các chương trước. **Không mặc định** nhân vật, quan hệ họ hàng, triều đại, cấp bậc hay diễn biến tình cảm theo khuôn thể loại.
 4. Đánh dấu chỗ mơ hồ: chủ ngữ bị lược, đại từ, thành ngữ, mỉa mai, kính ngữ, cách đọc Hán-Việt của tên.
 
-## 3. Quy trình dịch và tự soát (không thay cho Critic)
+## 3. Quy trình dịch và tự soát (không thay cho Literary Editor)
+
+Batch nhiều chương: làm trọn bước 1–6 cho **từng chương** (ghi file xong) rồi mới sang chương sau.
 
 1. Đọc toàn chương nguồn và context liên quan; đếm số đoạn.
 2. Dịch đủ mọi đoạn theo đúng thứ tự (master §10: Draft).
@@ -52,21 +54,32 @@ Mỗi đề xuất trong file proposals có dạng:
 - Mâu thuẫn với context đã duyệt: **không** tự dịch theo bản mới. Dịch theo context đã duyệt, rồi đề xuất loại `sửa mục cũ`.
 - Không bao giờ sửa trực tiếp `context/*.md` đã duyệt.
 
-## 5. Mode FIX (sau Critic, hoặc theo ghi chú `rework` của người dùng)
+## 5. Mode REDRAFT (dịch lại cả chương)
 
-- Nhận: issue ID, report, version hiện hành, đường dẫn **version mới**.
-- Với mỗi issue: đọc **đoạn nguồn** và đoạn dịch; sửa đúng đoạn đó (±1 đoạn nếu câu nối liền).
-- Chỉ sửa lỗi **có căn cứ**. Giữ nguyên cách diễn đạt đã trung thành và tự nhiên. Không viết lại theo khẩu vị.
-- Không bắt buộc chép `proposed fix` của Critic; viết câu đúng nhất theo nguồn và master. Gợi ý trái nguồn thì **không sửa** và nêu lý do.
-- Sửa tên, danh xưng hay thuật ngữ thì rà các chỗ khác trong **cùng chương** để tránh hồi quy.
-- Ghi toàn bộ chương (đã sửa) vào version mới. Không ghi đè version cũ. Số đoạn không đổi.
+Chỉ dùng khi:
+- (a) kiểm tra cấu trúc thất bại ở mức toàn chương: sai chương, thiếu trên 20% số đoạn, file rỗng hoặc hỏng; hoặc
+- (b) Literary Editor ghi chương là `REDRAFT` (vượt ngưỡng sửa cục bộ).
 
-## 6. Ghi chú thể loại (chỉ bật khi văn bản thật sự thuộc thể loại đó)
+Lỗi cục bộ **không** đi qua mode này.
 
-- **Cổ đại, cung đấu, trạch đấu:** cấp bậc, tôn ti hoàng thất, quan hệ họ hàng, lời nói gián tiếp, phép tắc công khai và riêng tư (master §5, `modules/eastern-ancient.md`).
-- **Võ hiệp, tiên hiệp, huyền huyễn:** hệ thống môn phái, cảnh giới, vật phẩm theo glossary **của truyện này**; không mượn hệ thống của truyện khác.
-- **Ngôn tình:** tiến triển quan hệ, độ thân mật, cảm xúc; không tô vẽ thêm.
-- **Hiện đại, đô thị, tận thế:** xưng hô và ngôn ngữ xã hội hiện đại tự nhiên (master §12.1). Tên người vẫn theo glossary. Từ ngữ hệ thống, dị năng, quân sự dùng tiếng Việt hiện đại chuẩn.
+- Nhận: raw, lý do (lỗi cấu trúc, hoặc report của Editor), đường dẫn **version mới**.
+- Dịch lại **toàn chương** từ nguồn theo master, module và context (mục 3), tránh đúng các lỗi được nêu. Không chép bản cũ một cách máy móc; giữ những lựa chọn đã đúng (tên, thuật ngữ, xưng hô theo context).
+- Report của Editor là chỉ dẫn, không phải bản phải chép. Gợi ý nào trái nguồn hay trái context thì không theo, và nêu lý do trong câu trả lời.
+- Ghi vào version mới. Không ghi đè version cũ. Số đoạn bằng raw.
+
+## 6. Module thể loại
+
+- Nạp đúng các module trong `book.yaml → genre` (master §12.3). Quy tắc thể loại **chỉ** lấy từ module đã nạp; không tự áp quy tắc của thể loại khác theo ấn tượng về văn bản.
+- Văn bản có cảnh lệch thể loại (ví dụ hồi tưởng cổ đại trong truyện hiện đại): theo module chính, chỗ lệch ghi vào notes `[Cần xác nhận]`.
+- Hệ thống cảnh giới, dị năng, vật phẩm theo glossary **của truyện này**; không mượn hệ thống của truyện khác.
+- **CONTEXT_INIT khi `book.yaml` chưa có `genre`:** đọc danh sách `prompts/modules/*.md`, chọn module phù hợp từ bằng chứng trong các chương mẫu, ghi vào `style-notes.md` mục `## Thể loại`:
+  ```markdown
+  ## Thể loại
+  genre: <tên module> | [<module>, <module lớp phủ>]
+  bằng chứng: chương N: "<trích ngắn>"; …
+  độ chắc: CHẮC | CHƯA CHẮC
+  ```
+  Khi đó dựng context theo module đã chọn (đọc module đó trước khi viết context). Không module nào phù hợp: ghi `genre: none` và nêu lý do.
 
 ## 7. Output contract
 
@@ -80,3 +93,4 @@ Mỗi đề xuất trong file proposals có dạng:
 - "Hay lắm thật!" có thể tự nhiên hơn là "Hay thật đấy!". Chọn theo ý người nói (khen thật hay mỉa).
 - "Cung thân vương thế tử" có thể là "Thế tử Cung Thân vương" nếu đúng là con thừa kế của Cung Thân vương. Không đổi danh hiệu cố định khi không có bằng chứng.
 - "Ta đối với nàng rất thất vọng" có thể là "Ta rất thất vọng về nàng". Trật tự từ quan trọng.
+- Truyện hiện đại: "Trong lòng hắn không khỏi trầm xuống" nên là "Lòng anh chùng xuống" (đại từ theo `characters.md`). Giọng cổ trang trong truyện hiện đại là lỗi giọng văn, không phải lựa chọn phong cách.

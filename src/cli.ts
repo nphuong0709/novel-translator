@@ -10,6 +10,10 @@
  *   novel status     <book-dir> [--from N] [--to M]
  *   novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
  *   novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]
+ *   novel save-report <book-dir> --agent <agentId> --out <reviews/...md>
+ *   novel edit-prep  <book-dir> --batch bNNNN --chapters 6,7,8 --from v1 --to v2
+ *   novel edit-check <book-dir> --batch bNNNN --report <reviews/...md>
+ *   novel agent-check <book-dir> --agent <agentId> [--model opus|sonnet]
  *
  * Không lệnh nào chạy Git trên dữ liệu truyện. `snapshot` (git bundle) là phần cũ, sẽ được
  * thay bằng backup zip ở slice T4.
@@ -31,6 +35,8 @@ import { BookPaths, neighborsOf, RawStore } from "./ingest/core/raw-store.js";
 import { buildAdapter } from "./ingest/factory.js";
 import { countOutcomes, runIngest } from "./ingest/run.js";
 import { createSnapshot, describeFile, findGoogleDriveRoot, SnapshotError } from "./snapshot.js";
+import { AgentReportError, checkReport, findAgentTranscript, loadAgentReport } from "./agent-report.js";
+import { checkEdit, EditGuardError, parseAgentInfo, prepareEdit } from "./edit-guard.js";
 
 const out = (msg = "") => process.stdout.write(`${msg}\n`);
 const err = (msg: string) => process.stderr.write(`${msg}\n`);
@@ -46,7 +52,11 @@ const USAGE = `Cách dùng:
   novel import     <book-dir> --dir <v1-raw-dir> [--from N] [--to M]
   novel status     <book-dir> [--from N] [--to M]
   novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
-  novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]`;
+  novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]
+  novel save-report <book-dir> --agent <agentId> --out <reviews/...md>
+  novel edit-prep  <book-dir> --batch bNNNN --chapters 6,7,8 --from v1 --to v2
+  novel edit-check <book-dir> --batch bNNNN --report <reviews/...md>
+  novel agent-check <book-dir> --agent <agentId> [--model opus|sonnet]`;
 
 function intOpt(v: string | undefined, name: string): number | undefined {
   if (v === undefined) return undefined;
@@ -325,6 +335,74 @@ async function cmdSnapshot(dir: string, v: Record<string, string | boolean | und
   });
 }
 
+// ---------------------------------------------------------------- save-report
+/** Lưu nguyên văn report của subagent vào `<book-dir>/reviews/...`. In VERDICT để orchestrator kiểm. */
+async function cmdSaveReport(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const agent = typeof v["agent"] === "string" ? v["agent"] : undefined;
+  const rel = typeof v["out"] === "string" ? v["out"] : undefined;
+  if (!agent || !rel) throw new UsageError(`save-report cần --agent và --out.\n${USAGE}`);
+  if (!/^reviews\/[\w./-]+\.md$/.test(rel) || rel.split("/").includes("..")) {
+    throw new UsageError("--out phải là đường dẫn .md bên trong reviews/ của truyện");
+  }
+  const root = process.env["CLAUDE_PROJECTS_DIR"] ?? join(homedir(), ".claude", "projects");
+  const report = await loadAgentReport(agent, root);
+  const target = join(resolve(dir), rel);
+  await writeFileAtomic(target, report);
+  const c = checkReport(report);
+  out(`Đã lưu ${rel} (${report.length} ký tự) · Đã áp dụng: ${c.hasApplied ? "có" : "THIẾU"} · VERDICT: ${c.verdict ?? "THIẾU"}`);
+  return c.hasApplied && c.verdict ? 0 : 2;
+}
+
+// ---------------------------------------------------------------- edit-prep / edit-check / agent-check
+function chaptersOpt(v: string | boolean | undefined): number[] {
+  if (typeof v !== "string" || !/^\d+(,\d+)*$/.test(v)) throw new UsageError("--chapters phải dạng 6,7,8");
+  return [...new Set(v.split(",").map(Number))];
+}
+
+/** Sao chép version nguồn → đích cho Editor và chụp hash các file được bảo vệ (blueprint 6.6). */
+async function cmdEditPrep(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string) : "");
+  const g = await prepareEdit(resolve(dir), { batch: str("batch"), chapters: chaptersOpt(v["chapters"]), from: str("from"), to: str("to") });
+  out(`Đã sao chép ${g.chapters.length} chương ${g.from} → ${g.to} · bảo vệ ${Object.keys(g.hashes).length} file · reviews/${g.batch}/edit-guard.json`);
+  return 0;
+}
+
+/** Kiểm tra sau biên tập (blueprint 9.2). Mã 0 = PASS, 2 = FAIL. */
+async function cmdEditCheck(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const batch = typeof v["batch"] === "string" ? v["batch"] : "";
+  const rel = typeof v["report"] === "string" ? v["report"] : "";
+  if (!batch || !/^reviews\/[\w./-]+\.md$/.test(rel) || rel.split("/").includes("..")) {
+    throw new UsageError(`edit-check cần --batch và --report reviews/....md\n${USAGE}`);
+  }
+  const r = await checkEdit(resolve(dir), batch, rel);
+  for (const c of r.chapters) {
+    const p = c.changed.filter((x) => x > 0).length;
+    out(`ch${String(c.chapter).padStart(4, "0")}: ${c.redraft ? "REDRAFT · " : ""}đoạn ${c.paragraphs.target}/${c.paragraphs.raw} · đổi ${p} (${(c.changedRatio * 100).toFixed(0)}%)${c.changed.includes(0) ? " + tiêu đề" : ""} · change ID ${c.logged.length}`);
+  }
+  for (const w of r.warns) out(`WARN ${w}`);
+  for (const f of r.fails) out(`FAIL ${f}`);
+  out(r.ok ? "EDIT-CHECK: PASS" : "EDIT-CHECK: FAIL");
+  return r.ok ? 0 : 2;
+}
+
+/** Model thật và cách chạy của một lần gọi subagent. Mã 2 khi không foreground hoặc sai model. */
+async function cmdAgentCheck(_dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const agent = typeof v["agent"] === "string" ? v["agent"] : "";
+  const want = typeof v["model"] === "string" ? v["model"] : undefined;
+  if (!agent) throw new UsageError(`agent-check cần --agent.\n${USAGE}`);
+  if (want !== undefined && !/^(opus|sonnet|haiku)$/.test(want)) throw new UsageError("--model phải là opus, sonnet hoặc haiku");
+  const root = process.env["CLAUDE_PROJECTS_DIR"] ?? join(homedir(), ".claude", "projects");
+  const path = await findAgentTranscript(agent, root);
+  const metaPath = path.replace(/\.jsonl$/, ".meta.json");
+  const info = parseAgentInfo(await readFile(path, "utf8"), existsSync(metaPath) ? await readFile(metaPath, "utf8") : null);
+  const modelOk = want === undefined || (info.models.length > 0 && info.models.every((m) => m.includes(want)));
+  const shapeOk = info.requestShape === null || info.requestShape === "foreground";
+  out(`agent ${agent} · ${info.agentType ?? "?"} · model: ${info.models.join(", ") || "?"}${want ? (modelOk ? " (đúng)" : ` (SAI, cần ${want})`) : ""} · chạy: ${info.requestShape ?? "?"}${shapeOk ? "" : " (SAI, cần foreground)"}`);
+  const u = info.usage;
+  out(`usage: ${u.calls} lượt · cache read ${u.cacheRead} · cache write ${u.cacheWrite} · output ${u.output} (thinking ${u.thinking}) · input ${u.input}`);
+  return modelOk && shapeOk ? 0 : 2;
+}
+
 // ---------------------------------------------------------------- main
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
@@ -352,6 +430,12 @@ export async function main(argv: string[]): Promise<number> {
       stage: { type: "string" },
       dest: { type: "string" },
       epub: { type: "string" },
+      agent: { type: "string" },
+      out: { type: "string" },
+      batch: { type: "string" },
+      chapters: { type: "string" },
+      report: { type: "string" },
+      model: { type: "string" },
     },
   });
   const dir = positionals[0];
@@ -371,6 +455,14 @@ export async function main(argv: string[]): Promise<number> {
       return cmdCrosscheck(dir, values);
     case "snapshot":
       return cmdSnapshot(dir, values);
+    case "save-report":
+      return cmdSaveReport(dir, values);
+    case "edit-prep":
+      return cmdEditPrep(dir, values);
+    case "edit-check":
+      return cmdEditCheck(dir, values);
+    case "agent-check":
+      return cmdAgentCheck(dir, values);
     default:
       throw new UsageError(`Lệnh không rõ: ${command}\n${USAGE}`);
   }
@@ -381,7 +473,7 @@ if (isEntry) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e: unknown) => {
-      if (e instanceof UsageError || e instanceof ConfigError || e instanceof LockHeldError || e instanceof SnapshotError) {
+      if (e instanceof UsageError || e instanceof ConfigError || e instanceof LockHeldError || e instanceof SnapshotError || e instanceof AgentReportError || e instanceof EditGuardError) {
         err(e.message);
         process.exit(1);
       }

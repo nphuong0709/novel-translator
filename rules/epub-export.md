@@ -6,7 +6,7 @@ Dùng chung cho EPUB đọc thử (cuối batch) và EPUB cuối (`/novel-finali
 
 - **Bản cuối:** mỗi chương lấy `translated/chapter-NNNN.<approved_version>.md` theo `status.json`. Thiếu `approved_version` thì dừng.
 - **Bản đọc thử:** lấy `current_version` của các chương đã có bản dịch; tên file `.draft.epub`; trang đầu ghi rõ "BẢN ĐỌC THỬ — chưa duyệt".
-- Sắp xếp theo số chương tăng dần. Không lấy bất cứ file nào ngoài `translated/`.
+- Sắp xếp theo số chương tăng dần. Không lấy bất cứ file nào ngoài `translated/`, và không lấy gì trong `translated/.history/`.
 
 ## 2. Chuẩn bị trong `output/.build/` (xóa và tạo lại mỗi lần)
 

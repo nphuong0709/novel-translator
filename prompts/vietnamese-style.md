@@ -1,12 +1,12 @@
-# Vietnamese Native Literary Style Guide — dùng chung cho Translator và Critic
+# Vietnamese Native Literary Style Guide — dùng chung cho Translator và Literary Editor
 
-> Một thước đo chung: Translator dùng khi viết, Critic dùng khi chấm. Bổ sung cho `translation-master.md` (mục 2, 3, 7), không thay thế.
-> Thứ tự ưu tiên khi khác nhau: context riêng của truyện → `translation-master.md` → file này.
+> Một thước đo chung: Translator dùng khi viết, Literary Editor dùng khi chấm và khi sửa. Bổ sung cho `translation-master.md` (mục 2, 3, 7), không thay thế.
+> Thứ tự ưu tiên khi khác nhau: context riêng của truyện → module thể loại (`prompts/modules/`) → `translation-master.md` → file này.
 > Mọi ví dụ là **minh họa cách lập luận**, không phải bảng thay thế cứng. Quyết định luôn dựa trên ngữ cảnh: ai nói, với ai, cảm xúc, thể loại, thời đại.
 
 ## Nguyên tắc chính
 
-Dịch **ý của câu chuyện thành văn xuôi tiếng Việt tự nhiên**, không phải dịch **ngữ pháp nguồn bằng từ vựng tiếng Việt**. Giữ nguyên nghĩa và sắc thái văn hóa của nguồn, nhất là hệ thống xưng hô trong truyện lịch sử và huyền huyễn Trung Hoa.
+Dịch **ý của câu chuyện thành văn xuôi tiếng Việt tự nhiên**, không phải dịch **ngữ pháp nguồn bằng từ vựng tiếng Việt**. Giữ nguyên nghĩa và sắc thái văn hóa của nguồn, nhất là hệ thống xưng hô theo đúng thời đại và thể loại của truyện (module).
 
 **Phép thử đọc to:** độc giả Việt phải hiểu câu mà không cần dựng lại ngữ pháp tiếng Trung hay tiếng Anh trong đầu.
 
@@ -72,7 +72,7 @@ Dịch **ý của câu chuyện thành văn xuôi tiếng Việt tự nhiên**, 
 - Tách hoặc gộp **đoạn** (được tách hoặc ghép **câu** trong cùng một đoạn).
 - Thay tên hoặc thuật ngữ đã chốt bằng từ "hay hơn".
 
-## 6. Mức độ (Critic dùng, thống nhất với `critic-master.md`)
+## 6. Mức độ (Editor dùng, thống nhất với `literary-editor-master.md` §4)
 
 - **MAJOR:** lỗi trật tự từ hoặc kết hợp từ lặp lại hoặc dễ thấy, danh xưng sai, lời thoại gượng làm hỏng việc đọc.
 - **MINOR:** câu vụng hoặc dấu câu riêng lẻ, không sai nghĩa.
