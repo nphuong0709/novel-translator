@@ -11,8 +11,10 @@
  *   novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
  *   novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]
  *   novel save-report <book-dir> --agent <agentId> --out <reviews/...md>
- *   novel edit-prep  <book-dir> --batch bNNNN --chapters 6,7,8 --from v1 --to v2
- *   novel edit-check <book-dir> --batch bNNNN --report <reviews/...md>
+ *   novel edit-prep  <book-dir> --batch bNNNN|sync --chapters 6,7,8 (--from v1 --to v2 | --next)
+ *   novel edit-check <book-dir> --batch bNNNN|sync --report <reviews/...md>
+ *   novel tidy       <book-dir> [--chapters 1,2,3]
+ *   novel term-scan  <book-dir> [--from N] [--to M]
  *   novel agent-check <book-dir> --agent <agentId> [--model opus|sonnet]
  *
  * Không lệnh nào chạy Git trên dữ liệu truyện. `snapshot` (git bundle) là phần cũ, sẽ được
@@ -36,7 +38,7 @@ import { buildAdapter } from "./ingest/factory.js";
 import { countOutcomes, runIngest } from "./ingest/run.js";
 import { createSnapshot, describeFile, findGoogleDriveRoot, SnapshotError } from "./snapshot.js";
 import { AgentReportError, checkReport, findAgentTranscript, loadAgentReport } from "./agent-report.js";
-import { checkEdit, EditGuardError, parseAgentInfo, prepareEdit } from "./edit-guard.js";
+import { checkEdit, EditGuardError, guardItems, parseAgentInfo, prepareEdit, scanTerms, tidyVersions } from "./edit-guard.js";
 
 const out = (msg = "") => process.stdout.write(`${msg}\n`);
 const err = (msg: string) => process.stderr.write(`${msg}\n`);
@@ -54,8 +56,10 @@ const USAGE = `Cách dùng:
   novel crosscheck <book-dir> --v1-raw <dir> [--from N] [--to M]
   novel snapshot   <book-dir> --stage raw|batch|final [--epub <file>] [--dest <dir>]
   novel save-report <book-dir> --agent <agentId> --out <reviews/...md>
-  novel edit-prep  <book-dir> --batch bNNNN --chapters 6,7,8 --from v1 --to v2
-  novel edit-check <book-dir> --batch bNNNN --report <reviews/...md>
+  novel edit-prep  <book-dir> --batch bNNNN|sync --chapters 6,7,8 (--from v1 --to v2 | --next)
+  novel edit-check <book-dir> --batch bNNNN|sync --report <reviews/...md>
+  novel tidy       <book-dir> [--chapters 1,2,3]
+  novel term-scan  <book-dir> [--from N] [--to M]
   novel agent-check <book-dir> --agent <agentId> [--model opus|sonnet]`;
 
 function intOpt(v: string | undefined, name: string): number | undefined {
@@ -362,9 +366,38 @@ function chaptersOpt(v: string | boolean | undefined): number[] {
 /** Sao chép version nguồn → đích cho Editor và chụp hash các file được bảo vệ (blueprint 6.6). */
 async function cmdEditPrep(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
   const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string) : "");
-  const g = await prepareEdit(resolve(dir), { batch: str("batch"), chapters: chaptersOpt(v["chapters"]), from: str("from"), to: str("to") });
-  out(`Đã sao chép ${g.chapters.length} chương ${g.from} → ${g.to} · bảo vệ ${Object.keys(g.hashes).length} file · reviews/${g.batch}/edit-guard.json`);
+  const g = await prepareEdit(resolve(dir), {
+    batch: str("batch"),
+    chapters: chaptersOpt(v["chapters"]),
+    from: str("from") || undefined,
+    to: str("to") || undefined,
+    next: v["next"] === true,
+  });
+  const items = guardItems(g);
+  const pairs = g.from !== "mixed" && g.to !== "mixed" ? `${g.from} → ${g.to}` : items.map((i) => `ch${i.chapter} ${i.from}→${i.to}`).join(", ");
+  out(`Đã sao chép ${g.chapters.length} chương ${pairs} · bảo vệ ${Object.keys(g.hashes).length} file · reviews/${g.batch}/edit-guard.json`);
+  for (const i of items) out(`  ch${String(i.chapter).padStart(4, "0")}: ${i.from} → ${i.to}`);
   return 0;
+}
+
+/** Chuyển version trung gian (khác v1, current, approved) vào translated/.history/. */
+async function cmdTidy(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const moves = await tidyVersions(resolve(dir), v["chapters"] === undefined ? undefined : chaptersOpt(v["chapters"]));
+  for (const m of moves) out(`${m.from} → ${m.to}`);
+  out(`TIDY: chuyển ${moves.length} file`);
+  return 0;
+}
+
+/** Tìm từ cấm (cột `Cấm (scan)` trong context/*.md) trong bản hiện hành. Mã 0 = sạch, 2 = có ứng viên. */
+async function cmdTermScan(dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
+  const from = intOpt(typeof v["from"] === "string" ? v["from"] : undefined, "--from");
+  const to = intOpt(typeof v["to"] === "string" ? v["to"] : undefined, "--to");
+  const range = from !== undefined || to !== undefined ? { from: from ?? 1, to: to ?? Number.MAX_SAFE_INTEGER } : undefined;
+  const { terms, hits } = await scanTerms(resolve(dir), range);
+  for (const h of hits) out(`ch${String(h.chapter).padStart(4, "0")}.${h.version}:${h.line} · "${h.term}" → "${h.canonical}" (${h.source})`);
+  const chapters = [...new Set(hits.map((h) => h.chapter))];
+  out(`TERM-SCAN: ${terms.length} biến thể cấm · ${hits.length} chỗ · chương: ${chapters.join(",") || "—"}`);
+  return hits.length ? 2 : 0;
 }
 
 /** Kiểm tra sau biên tập (blueprint 9.2). Mã 0 = PASS, 2 = FAIL. */
@@ -385,7 +418,11 @@ async function cmdEditCheck(dir: string, v: Record<string, string | boolean | un
   return r.ok ? 0 : 2;
 }
 
-/** Model thật và cách chạy của một lần gọi subagent. Mã 2 khi không foreground hoặc sai model. */
+/**
+ * Model thật và cách chạy của một lần gọi subagent.
+ * Mã 2 khi sai model, hoặc chạy nền mà chưa xong (hay không xác định được đã xong).
+ * Chạy nền nhưng đã xong: chỉ cảnh báo (WARN), mã 0.
+ */
 async function cmdAgentCheck(_dir: string, v: Record<string, string | boolean | undefined>): Promise<number> {
   const agent = typeof v["agent"] === "string" ? v["agent"] : "";
   const want = typeof v["model"] === "string" ? v["model"] : undefined;
@@ -396,8 +433,10 @@ async function cmdAgentCheck(_dir: string, v: Record<string, string | boolean | 
   const metaPath = path.replace(/\.jsonl$/, ".meta.json");
   const info = parseAgentInfo(await readFile(path, "utf8"), existsSync(metaPath) ? await readFile(metaPath, "utf8") : null);
   const modelOk = want === undefined || (info.models.length > 0 && info.models.every((m) => m.includes(want)));
-  const shapeOk = info.requestShape === null || info.requestShape === "foreground";
-  out(`agent ${agent} · ${info.agentType ?? "?"} · model: ${info.models.join(", ") || "?"}${want ? (modelOk ? " (đúng)" : ` (SAI, cần ${want})`) : ""} · chạy: ${info.requestShape ?? "?"}${shapeOk ? "" : " (SAI, cần foreground)"}`);
+  const foreground = info.requestShape === null || info.requestShape === "foreground";
+  const shapeOk = foreground || info.finished === true;
+  const shapeNote = foreground ? "" : info.finished === true ? " (WARN: chạy nền nhưng đã xong)" : " (SAI: chạy nền, chưa xác nhận đã xong)";
+  out(`agent ${agent} · ${info.agentType ?? "?"} · model: ${info.models.join(", ") || "?"}${want ? (modelOk ? " (đúng)" : ` (SAI, cần ${want})`) : ""} · chạy: ${info.requestShape ?? "?"}${shapeNote}`);
   const u = info.usage;
   out(`usage: ${u.calls} lượt · cache read ${u.cacheRead} · cache write ${u.cacheWrite} · output ${u.output} (thinking ${u.thinking}) · input ${u.input}`);
   return modelOk && shapeOk ? 0 : 2;
@@ -436,6 +475,7 @@ export async function main(argv: string[]): Promise<number> {
       chapters: { type: "string" },
       report: { type: "string" },
       model: { type: "string" },
+      next: { type: "boolean" },
     },
   });
   const dir = positionals[0];
@@ -463,6 +503,10 @@ export async function main(argv: string[]): Promise<number> {
       return cmdEditCheck(dir, values);
     case "agent-check":
       return cmdAgentCheck(dir, values);
+    case "tidy":
+      return cmdTidy(dir, values);
+    case "term-scan":
+      return cmdTermScan(dir, values);
     default:
       throw new UsageError(`Lệnh không rõ: ${command}\n${USAGE}`);
   }

@@ -10,7 +10,9 @@
 > 3. Pilot giữ tạm `critic.md` làm reviewer chuẩn chỉ đọc, xóa sau pilot.
 > 4. `approve-context` tự chạy tiếp phạm vi đã yêu cầu.
 >
-> **Đã cài T5 (2026-11-05):** prompt, agent, skill, contract, cùng `novel edit-prep | edit-check | agent-check` (`src/edit-guard.ts`, có test). Pilot chưa chạy (`docs/pilot-t5.md`).
+> **Đã cài T5 (2026-11-05):** prompt, agent, skill, contract, cùng `novel edit-prep | edit-check | agent-check` (`src/edit-guard.ts`, có test).
+>
+> **Sửa đổi sau pilot (người dùng chốt 2026-11-05):** pilot chạy một phần (Translator Sonnet + Editor Opus trên ch6–8, Editor PASS, edit-check PASS) rồi **bỏ, không đo tiếp**. Token thô của nhánh Sonnet không thấp hơn mô hình cũ. Quyết định: **Translator dùng Opus** ở mọi mode; giữ Literary Editor (Opus). Xóa `critic.md`, `docs/pilot-t5.md` và dữ liệu `books/kzgd-pilot/`; `critic-master.md` chuyển sang `docs/archive/`. Tiêu chí 11–13 ở mục 14 không còn áp dụng. Các chỗ ghi "Sonnet" cho Translator trong tài liệu này là thiết kế cũ.
 
 ---
 
@@ -86,7 +88,6 @@ novel-translator/
 │   └── agents/
 │       ├── translator.md          # mặc định Sonnet · medium (TRANSLATE, REDRAFT); CONTEXT_INIT được gọi với model Opus; tools: Read, Grep, Glob, Write, Edit
 │       ├── literary-editor.md     # Opus · medium; REVIEW_EDIT, REWORK, FINAL; tools: Read, Grep, Glob, Write, Edit (không Agent, không Bash)
-│       └── critic.md              # TẠM, chỉ cho pilot T5: reviewer chuẩn chỉ đọc (Read, Grep, Glob); xóa sau pilot
 ├── prompts/
 │   ├── translation-master.md      # tầng 1: luật dịch chung mọi thể loại (tái cấu trúc từ V1, 2026-11-04)
 │   ├── modules/*.md               # tầng 2: eastern-ancient, modern, system-game, western-fantasy (nạp theo genre)
@@ -489,7 +490,7 @@ Thứ tự ưu tiên: dùng lại code crawler và prompt có sẵn; mỗi slice
 ## 14. Acceptance criteria (MVP)
 
 1. Ba command chạy được trên KZGD: crawl (dữ liệu đã có), dịch 1 batch, finalize ra EPUB.
-2. Chỉ có 2 subagent trong workflow (Translator, Literary Editor); không agent nào gọi được agent khác. Ngoại lệ có thời hạn: `critic.md` chỉ dùng làm reviewer chuẩn trong pilot T5, không có trong skill nào của workflow, và bị xóa khi pilot kết thúc. Kiểm tra sau biên tập bắt được mọi trường hợp Editor đổi raw, v1 hay context, và mọi đoạn bị sửa mà không có change ID.
+2. Chỉ có 2 subagent trong workflow (Translator, Literary Editor); không agent nào gọi được agent khác. Kiểm tra sau biên tập bắt được mọi trường hợp Editor đổi raw, v1 hay context, và mọi đoạn bị sửa mà không có change ID.
 3. Không có thao tác Git nào trong workflow dữ liệu; không có hook.
 4. Batch dừng ở `PENDING_USER_APPROVAL`; chỉ lệnh do người dùng gõ mới đặt `APPROVED`; trạng thái tách kết luận của Editor khỏi phê duyệt của người dùng.
 5. Chạy lại sau khi bị ngắt hoặc hết usage thì không dịch lại và không review lại phần đã xong; phát hiện được STALE.
@@ -498,6 +499,6 @@ Thứ tự ưu tiên: dùng lại code crawler và prompt có sẵn; mỗi slice
 8. EPUB qua epubcheck, mục lục đúng, Unicode tiếng Việt đúng, không lẫn review hay prompt.
 9. Agent đọc đủ master, module theo genre và context; khai báo đúng các file đã áp dụng.
 10. Không dùng API key trả phí; chạy được trên gói Claude Pro (kiểm `/model` và `/usage` ở T2).
-11. **(Pilot T5, chất lượng)** Trên cùng 3 chương, bản sau biên tập của mô hình mới được chấm bởi **cùng một reviewer chuẩn** (`critic.md` hiện tại: Opus, chỉ đọc, chạy riêng cho pilot; không sửa file, không tham gia workflow): số `CRITICAL` không tăng, `MAJOR` ≤ mô hình cũ + 1; kiểm tra tự động (biến thể cấm, cặp xưng hô chính, từ vùng miền theo quyết định người dùng, chữ Hán sót) không có lỗi mới; người dùng đọc mù 2–3 cảnh không chọn bản cũ ở ≥ 2/3 mẫu.
-12. **(Pilot T5, biên tập có kiểm soát)** Không chương nào bị viết lại trên 30% số đoạn mà không ghi `REDRAFT`. 100% thay đổi có căn cứ hợp lệ (mục 6.4). Kiểm tra sau biên tập PASS.
-13. **(Pilot T5, usage)** % `/usage` cho mỗi chương (Translator cộng Editor) thấp hơn mô hình cũ (Translator, Critic, FIX, REVALIDATE). Ghi kèm token theo transcript (cache read, cache write, output, thinking) để đối chiếu.
+11. *(Bỏ 2026-11-05, pilot không chạy hết.)* **(Pilot T5, chất lượng)** Trên cùng 3 chương, bản sau biên tập của mô hình mới được chấm bởi **cùng một reviewer chuẩn** (`critic.md` hiện tại: Opus, chỉ đọc, chạy riêng cho pilot; không sửa file, không tham gia workflow): số `CRITICAL` không tăng, `MAJOR` ≤ mô hình cũ + 1; kiểm tra tự động (biến thể cấm, cặp xưng hô chính, từ vùng miền theo quyết định người dùng, chữ Hán sót) không có lỗi mới; người dùng đọc mù 2–3 cảnh không chọn bản cũ ở ≥ 2/3 mẫu.
+12. *(Bỏ 2026-11-05.)* **(Pilot T5, biên tập có kiểm soát)** Không chương nào bị viết lại trên 30% số đoạn mà không ghi `REDRAFT`. 100% thay đổi có căn cứ hợp lệ (mục 6.4). Kiểm tra sau biên tập PASS.
+13. *(Bỏ 2026-11-05.)* **(Pilot T5, usage)** % `/usage` cho mỗi chương (Translator cộng Editor) thấp hơn mô hình cũ (Translator, Critic, FIX, REVALIDATE). Ghi kèm token theo transcript (cache read, cache write, output, thinking) để đối chiếu.

@@ -70,7 +70,7 @@ export interface ReportCheck {
   verdict: string | null;
 }
 
-/** Kiểm hai dòng bắt buộc của report Critic (critic-master §5). */
+/** Kiểm hai dòng bắt buộc của report Critic (docs/archive/critic-master.md §5). */
 export function checkReport(report: string): ReportCheck {
   const hasApplied = /^Đã áp dụng:/m.test(report);
   const v = /^VERDICT:\s*([A-Z_]+)/m.exec(report);

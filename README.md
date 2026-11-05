@@ -31,10 +31,10 @@ Công cụ ngoài: `pandoc` ≥ 3 và `epubcheck` (xuất EPUB), Google Chrome (
 | Thành phần | Vai trò |
 |---|---|
 | Skills (`.claude/skills/`) | Thứ tự bước, chuyển file, điểm dừng |
-| Agents (`.claude/agents/`) | `translator` (dịch, sửa), `critic` (chỉ đọc; CHAPTER, REVALIDATE, BATCH, FINAL) |
-| Prompts (`prompts/`) | Chất lượng: master prompt V1 nguyên văn, workflow addendum, critic master, chuẩn tiếng Việt |
+| Agents (`.claude/agents/`) | `translator` (Opus: dựng context, dịch nháp, REDRAFT), `literary-editor` (Opus: review và sửa cục bộ; REVIEW_EDIT, REWORK, FINAL) |
+| Prompts (`prompts/`) | Chất lượng: master prompt V1 nguyên văn, workflow addendum, literary-editor master, module thể loại, chuẩn tiếng Việt |
 | Context (`books/<id>/context/`) | Nhân vật, quan hệ và xưng hô theo chương, glossary, tóm tắt |
-| Status (`books/<id>/status.json`) | Checkpoint, kết luận của Critic, phê duyệt của bạn (tách nhau) |
+| Status (`books/<id>/status.json`) | Checkpoint, kết luận của Editor, phê duyệt của bạn (tách nhau) |
 
 - Dừng sau crawl, sau khi dựng context, và sau mỗi batch. Finalize chỉ khi bạn gõ lệnh.
 - Bị ngắt hoặc hết usage: gõ lại đúng lệnh; workflow đọc `status.json` và artifact để làm tiếp.

@@ -6,7 +6,12 @@ import { main } from "../src/cli.js";
 import {
   changedParagraphs,
   checkEdit,
+  currentRound,
   EditGuardError,
+  nextVersion,
+  parseForbiddenTerms,
+  scanTerms,
+  tidyVersions,
   paragraphCount,
   parseAgentInfo,
   parseChangeLog,
@@ -173,6 +178,7 @@ describe("agent-check", () => {
       agentType: "translator",
       requestShape: "background",
       models: ["claude-opus-5-5"],
+      finished: null,
       usage: { calls: 2, input: 4, cacheRead: 200, cacheWrite: 100, output: 60, thinking: 20 },
     });
   });
@@ -190,7 +196,18 @@ describe("agent-check", () => {
     if (saved === undefined) delete process.env["CLAUDE_PROJECTS_DIR"];
     else process.env["CLAUDE_PROJECTS_DIR"] = saved;
   });
-  it("mã 0 khi đúng model và foreground; 2 khi sai model hoặc chạy nền", async () => {
+  it("finished: lấy từ meta.json, không có thì từ lượt cuối (SubagentHandback / end_turn)", () => {
+    const handback = line({ type: "assistant", message: { id: "m3", model: "claude-opus-5-5", usage, content: [{ type: "tool_use", name: "SubagentHandback" }] } });
+    const endTurn = line({ type: "assistant", message: { id: "m3", model: "claude-opus-5-5", usage, stop_reason: "end_turn", content: [] } });
+    expect(parseAgentInfo(`${jsonl}\n${handback}`, null).finished).toBe(true);
+    expect(parseAgentInfo(`${jsonl}\n${endTurn}`, null).finished).toBe(true);
+    // Lượt cuối chưa kết thúc dù trước đó có handback.
+    expect(parseAgentInfo(`${handback}\n${jsonl}`, null).finished).toBe(null);
+    expect(parseAgentInfo(`${jsonl}\n${handback}`, '{"finished":false}').finished).toBe(false);
+    expect(parseAgentInfo(jsonl, '{"finished":true}').finished).toBe(true);
+  });
+
+  it("mã 0 khi đúng model và foreground; 2 khi sai model hoặc chạy nền chưa xong", async () => {
     const log = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     try {
       await writeFile(join(root, "proj/sess/subagents/agent-abc123.meta.json"), '{"agentType":"translator","requestShape":"foreground"}');
@@ -198,8 +215,133 @@ describe("agent-check", () => {
       expect(await main(["agent-check", ".", "--agent", "abc123", "--model", "sonnet"])).toBe(2);
       await writeFile(join(root, "proj/sess/subagents/agent-abc123.meta.json"), '{"agentType":"translator","requestShape":"background"}');
       expect(await main(["agent-check", ".", "--agent", "abc123"])).toBe(2);
+      await writeFile(join(root, "proj/sess/subagents/agent-abc123.meta.json"), '{"agentType":"translator","requestShape":"background","finished":false}');
+      expect(await main(["agent-check", ".", "--agent", "abc123"])).toBe(2);
+      // Chạy nền nhưng đã xong: chỉ cảnh báo; sai model vẫn chặn.
+      await writeFile(join(root, "proj/sess/subagents/agent-abc123.meta.json"), '{"agentType":"translator","requestShape":"background","finished":true}');
+      expect(await main(["agent-check", ".", "--agent", "abc123", "--model", "opus"])).toBe(0);
+      expect(await main(["agent-check", ".", "--agent", "abc123", "--model", "sonnet"])).toBe(2);
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe("version theo từng chương (--next), sync, report nhiều vòng", () => {
+  let book: string;
+  const status = (chs: Record<string, { current_version: string; approved_version?: string | null }>) =>
+    writeFile(join(book, "status.json"), JSON.stringify({ chapters: chs }));
+  beforeEach(async () => {
+    book = await mkdtemp(join(tmpdir(), "edit-guard-next-"));
+    for (const d of ["raw", "translated/.history", "context", "reviews/b0001", "reviews/b0002", "reviews/sync"]) await mkdir(join(book, d), { recursive: true });
+    for (const n of ["0001", "0002"]) await writeFile(join(book, `raw/chapter-${n}.md`), RAW);
+    await writeFile(join(book, "translated/chapter-0001.v1.md"), V1);
+    await writeFile(join(book, "translated/chapter-0001.v2.md"), V1);
+    await writeFile(join(book, "translated/chapter-0002.v1.md"), V1);
+    await writeFile(join(book, "translated/.history/chapter-0002.v3.md.partial"), V1);
+    await writeFile(join(book, "reviews/b0001/summaries.md"), "## Chương 1\n");
+    await writeFile(join(book, "reviews/b0002/summaries.md"), "## Chương 2\n");
+    await status({ "0001": { current_version: "v2" }, "0002": { current_version: "v1" } });
+  });
+
+  it("nextVersion tính cả file trong .history", async () => {
+    expect(await nextVersion(book, 1)).toBe("v3");
+    expect(await nextVersion(book, 2)).toBe("v4");
+  });
+
+  it("--next: mỗi chương từ current_version tới version trống kế tiếp; guard sync bảo vệ summaries mọi batch", async () => {
+    const g = await prepareEdit(book, { batch: "sync", chapters: [2, 1], next: true });
+    expect(g.items).toEqual([
+      { chapter: 1, from: "v2", to: "v3" },
+      { chapter: 2, from: "v1", to: "v4" },
+    ]);
+    expect(g.from).toBe("mixed");
+    expect(Object.keys(g.hashes)).toEqual(expect.arrayContaining(["reviews/b0001/summaries.md", "reviews/b0002/summaries.md"]));
+    await writeFile(join(book, "translated/chapter-0001.v3.md"), V2_OK);
+    await writeFile(join(book, "reviews/sync/editor-sync.md"), report(ENTRY));
+    const r = await checkEdit(book, "sync", "reviews/sync/editor-sync.md");
+    expect(r.fails).toEqual([]);
+    expect(r.chapters.map((c) => c.changed)).toEqual([[1], []]);
+  });
+
+  it("từ chối --next cùng --from/--to", async () => {
+    await expect(prepareEdit(book, { batch: "b0001", chapters: [1], next: true, from: "v1", to: "v2" })).rejects.toBeInstanceOf(EditGuardError);
+  });
+
+  it("report nhiều vòng: chỉ xét vòng cuối", async () => {
+    const r1 = report(ENTRY);
+    const r2 = report("", "Chương: 1 PASS (sửa 0)");
+    expect(currentRound(`${r1}\n# Vòng 2\n${r2}`)).toBe(`\n${r2}`);
+    expect(currentRound(r1)).toBe(r1);
+    await prepareEdit(book, { batch: "b0001", chapters: [1], next: true });
+    await writeFile(join(book, "translated/chapter-0001.v3.md"), V2_OK);
+    // vòng 1 (cũ) có change ID, vòng 2 (cuối) thì không → FAIL
+    await writeFile(join(book, "reviews/b0001/editor-rework.md"), `# Vòng 1\n${r1}\n# Vòng 2\n${r2}`);
+    expect((await checkEdit(book, "b0001", "reviews/b0001/editor-rework.md")).ok).toBe(false);
+    await writeFile(join(book, "reviews/b0001/editor-rework.md"), `# Vòng 1\n${r2}\n# Vòng 2\n${r1}`);
+    expect((await checkEdit(book, "b0001", "reviews/b0001/editor-rework.md")).ok).toBe(true);
+  });
+});
+
+describe("tidy", () => {
+  it("giữ v1, current, approved; chuyển phần còn lại vào .history (không ghi đè)", async () => {
+    const book = await mkdtemp(join(tmpdir(), "tidy-"));
+    await mkdir(join(book, "translated/.history"), { recursive: true });
+    for (const v of ["v1", "v2", "v3", "v4"]) await writeFile(join(book, `translated/chapter-0001.${v}.md`), v);
+    await writeFile(join(book, "translated/chapter-0002.v1.md"), "x");
+    await writeFile(join(book, "translated/chapter-0002.v2.md"), "x");
+    await writeFile(join(book, "translated/.history/chapter-0001.v2.md"), "cũ");
+    await writeFile(
+      join(book, "status.json"),
+      JSON.stringify({ chapters: { "0001": { current_version: "v4", approved_version: "v3" }, "0002": { current_version: null } } }),
+    );
+    const moves = await tidyVersions(book);
+    expect(moves).toEqual([{ from: "translated/chapter-0001.v2.md", to: "translated/.history/chapter-0001.v2.md.2" }]);
+    expect(await readFile(join(book, "translated/.history/chapter-0001.v2.md"), "utf8")).toBe("cũ");
+  });
+});
+
+describe("term-scan", () => {
+  const GLOSSARY = `# Glossary
+
+| Gốc | Bản dịch | Biến thể cấm | Ghi chú |
+|---|---|---|---|
+| 块 | tệ | đồng | phụ thuộc ngữ cảnh: không quét |
+
+| Gốc | Đúng | Cấm (scan) | Quyết định |
+|---|---|---|---|
+| 父母 | **ba mẹ** | bố mẹ | U6 |
+| 切片 | xắt lát | "thái lát", "thái sợi" | U18 |
+| 院子 | sân | — | |
+
+Đoạn văn không phải bảng.
+
+| Gốc | Bản dịch |
+|---|---|
+| 雨 | mưa |
+`;
+  it("chỉ đọc cột Cấm (scan), bỏ ô trống", () => {
+    expect(parseForbiddenTerms(GLOSSARY, "context/glossary.md")).toEqual([
+      { term: "bố mẹ", canonical: "ba mẹ", source: "context/glossary.md" },
+      { term: "thái lát", canonical: "xắt lát", source: "context/glossary.md" },
+      { term: "thái sợi", canonical: "xắt lát", source: "context/glossary.md" },
+    ]);
+  });
+  it("tìm trong current_version, khớp nguyên từ, không đọc proposals", async () => {
+    const book = await mkdtemp(join(tmpdir(), "term-scan-"));
+    for (const d of ["translated", "context/proposals"]) await mkdir(join(book, d), { recursive: true });
+    await writeFile(join(book, "context/glossary.md"), GLOSSARY);
+    await writeFile(join(book, "context/proposals/b0001.md"), "| A | B | Cấm (scan) |\n|---|---|---|\n| x | y | trời |\n");
+    await writeFile(join(book, "translated/chapter-0001.v1.md"), "# Chương 1\n\nBố mẹ cậu thái lát thịt.\n");
+    await writeFile(join(book, "translated/chapter-0001.v2.md"), "# Chương 1\n\nBa mẹ cậu xắt lát thịt. Bố mẹđẻ.\n");
+    await writeFile(join(book, "status.json"), JSON.stringify({ chapters: { "0001": { current_version: "v2" } } }));
+    const { hits } = await scanTerms(book);
+    expect(hits).toEqual([]);
+    await writeFile(join(book, "status.json"), JSON.stringify({ chapters: { "0001": { current_version: "v1" } } }));
+    const r = await scanTerms(book);
+    expect(r.hits.map((h) => [h.term, h.line])).toEqual([
+      ["bố mẹ", 3],
+      ["thái lát", 3],
+    ]);
   });
 });

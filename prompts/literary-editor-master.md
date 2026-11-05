@@ -118,6 +118,8 @@ Một chương rơi vào **một** trong ba trường hợp sau thì **dừng s�
 
 Chương `REDRAFT`: để bản làm việc như lúc nhận, hoặc hoàn tác hết. Translator sẽ dịch lại; bạn review lại sau.
 
+**Ngoại lệ (người dùng duyệt 2026-11-05, tiền lệ U11):** ở mode `REWORK` và `SYNC`, đoạn chỉ **thay từ hoặc cụm từ** theo quyết định người dùng đã chốt (không viết lại câu, không đổi nghĩa) **không** tính vào mốc 30%. Ghi rõ số đoạn loại này ở mục `## Thay đổi quan trọng`.
+
 ### 6.4 Không được
 
 - Sửa raw, bản nháp, version cũ, context đã duyệt, proposals, summaries, notes, `status.json`, hay bất kỳ file nào ngoài **file version đích và file report được giao**.
@@ -154,7 +156,7 @@ Không bao giờ ghi hay ngụ ý rằng **người dùng đã duyệt**.
 
 ## 8. Report
 
-Ghi bằng `Write` vào file được giao (`reviews/<batch>/editor-batch.md`, `editor-rework.md`, `reviews/final/editor-final.md`). Report **không bao giờ** đi vào file truyện.
+Ghi vào file được giao (`reviews/<batch>/editor-batch.md`, `editor-rework.md`, `reviews/sync/editor-sync.md`, `reviews/final/editor-final.md`). File đã có thì nối vòng mới dưới dòng `# Vòng N`, giữ nguyên vòng cũ (xem agent `literary-editor`, mục Ghi file). Report **không bao giờ** đi vào file truyện.
 
 ```
 Đã áp dụng: literary-editor-master.md, translation-master.md, vietnamese-style.md, modules: <danh sách|không>, context v<N>, mode <MODE>
@@ -177,6 +179,12 @@ Chương: 6 PASS (sửa 7) · 7 PASS (sửa 3) · 8 REDRAFT (lý do ngắn)
 
 ## Đề xuất context
 | Mục | Kết luận (ACCEPT / REJECT / NEEDS_USER) | Lý do |
+
+## Câu hỏi cho người dùng
+<mỗi mục NEEDS_USER (phát hiện hoặc đề xuất context) một khối; orchestrator chép nguyên vào hàng đợi `reviews/questions.md`. Không có thì ghi `- không có`>
+- id: Q-<chương hoặc batch>-<số> · vị trí: ch<N> đ<k>[, …] · nguồn: «…»
+  câu hỏi: <một câu, người không đọc report vẫn hiểu>
+  lựa chọn: <2–4 lựa chọn ngắn> · đề xuất: <lựa chọn nên dùng> · đang dùng tạm: <lựa chọn đang có trong bản làm việc>
 
 ## Post-edit Source Fidelity Check
 | change ID | PASS / FAIL→đã sửa lại / FAIL→đã hoàn tác | ghi chú |
@@ -213,7 +221,16 @@ Không có thay đổi nào thì vẫn giữ tiêu đề `## Change log` và ghi
 - Chỉ xử lý điều ghi chú nêu.
 - `revert E-…`: lấy lại nguyên văn đoạn đó từ version trước, ghi một change ID mới với `basis: "người dùng: revert E-…"`.
 - Ghi chú yêu cầu đồng bộ giọng hay từ vựng trên nhiều chương: vẫn sửa cục bộ từng chỗ, mỗi đoạn một change ID; không viết lại cả chương.
-- Bước 8 áp dụng cho mọi thay đổi. Report theo §8 vào `editor-rework.md`.
+- Bước 8 áp dụng cho mọi thay đổi. Report theo §8 vào `editor-rework.md` (vòng sau nối `# Vòng N`).
+
+### 9.2b SYNC: áp quyết định đã chốt lên các chương đã dịch
+
+**Input:** danh sách quyết định cần áp (trích `context/decisions.md`, mỗi mục có mã `U<n>`); kết quả `novel term-scan` (ứng viên biến thể cấm theo chương/dòng); mỗi chương: raw và bản làm việc; context.
+
+**Làm:**
+- Chỉ áp các quyết định được giao, ở **mọi** chương được giao. Ứng viên của `term-scan` là gợi ý: đối chiếu raw, chỗ nào không thuộc phạm vi quyết định (tên riêng, nghĩa khác) thì không sửa và ghi lý do ngắn.
+- Không review lại cả chương, không sửa lỗi khác (ghi vào `## Phát hiện không sửa` nếu đáng nêu).
+- Bước 8 cho mọi thay đổi. Report theo §8 vào `reviews/sync/editor-sync.md` (vòng sau nối `# Vòng N`). Change ID dạng `S-ch<NNNN>-<số>`.
 
 ### 9.3 FINAL: toàn phạm vi xuất bản
 

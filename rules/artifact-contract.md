@@ -15,20 +15,25 @@ books/<book-id>/
 │   ├── relationships.md         # ma trận xưng hô theo phạm vi chương (đã duyệt)
 │   ├── glossary.md              # thuật ngữ | bản dịch | biến thể cấm | nguồn chương (đã duyệt)
 │   ├── continuity.md            # tóm tắt 1–3 dòng mỗi chương (đã duyệt)
+│   ├── decisions.md             # nhật ký quyết định của người dùng (U1, U2…), mỗi mục ghi context version; hiệu lực ngay
 │   └── proposals/               # đề xuất CHƯA duyệt của translator
 │       ├── initial/             # context lần đầu: characters.md, relationships.md, glossary.md, style-notes.md
 │       └── b0001.md             # đề xuất cập nhật context của batch b0001
 ├── translated/
 │   ├── chapter-0001.v1.md       # bản NHÁP của translator (chỉ nội dung truyện); bất biến kể từ khi Editor bắt đầu
 │   ├── chapter-0001.v2.md       # bản SAU BIÊN TẬP: `novel edit-prep` sao chép v1, literary-editor sửa cục bộ trên bản sao
-│   ├── chapter-0001.v3.md       # (nếu có) rework / REDRAFT / sửa ở FINAL; mỗi lần sửa là một version mới, không ghi đè version cũ
-│   └── .history/                # version không được duyệt, chuyển vào khi batch được approve (không xóa)
+│   ├── chapter-0001.v3.md       # (nếu có) rework / sync / REDRAFT / sửa ở FINAL; mỗi lần sửa là một version mới, không ghi đè version cũ
+│   └── .history/                # version trung gian (`novel tidy`) và version không được duyệt (không xóa)
 ├── reviews/
 │   ├── ingestion.md             # báo cáo crawl
+│   ├── questions.md             # hàng đợi câu hỏi cho người dùng (OPEN / ANSWERED (U<n>)), một file cho cả truyện
+│   ├── sync/
+│   │   ├── editor-sync.md            # report SYNC (áp quyết định lên chương đã dịch); vòng sau nối `# Vòng N`
+│   │   └── edit-guard.json
 │   ├── b0001/
 │   │   ├── summaries.md              # tóm tắt chương của batch (translator viết; gộp vào continuity khi duyệt)
 │   │   ├── editor-batch.md           # REVIEW_EDIT cả batch (≤3 chương): phát hiện + change log + post-edit check + VERDICT (Editor ghi)
-│   │   ├── editor-rework.md          # (nếu có) REWORK theo ghi chú người dùng; vòng sau: editor-rework-2.md
+│   │   ├── editor-rework.md          # (nếu có) REWORK theo ghi chú người dùng; vòng sau nối `# Vòng N` trong cùng file (batch cũ có thể còn editor-rework-2.md…)
 │   │   ├── editor-redraft.md         # (nếu có) review lại chương REDRAFT
 │   │   ├── edit-guard.json           # hash các file Editor không được đổi (`novel edit-prep`), dùng cho `novel edit-check`
 │   │   ├── critic-batch.md, revalidate-batch.md, critic-chapter-0001.md   # (cũ, trước D-16) report của Critic chỉ đọc
@@ -46,7 +51,9 @@ books/<book-id>/
 - Mã chương luôn có **4 chữ số** (`0001`). Mã batch: `b` + 4 chữ số của thứ tự batch.
 - Phạm vi batch: chia phạm vi được yêu cầu thành các đoạn liên tiếp, mỗi đoạn `batch-size` chương (mặc định **3**, tối đa 3: một lần gọi translator và một lần gọi literary-editor cho cả batch). Batch đã ghi trong `status.json` thì giữ nguyên phạm vi cũ.
 - `--auto`: chạy liền nhiều batch, mỗi batch dừng ở `PENDING_USER_APPROVAL`; người dùng duyệt sau, có thể duyệt gộp `approve <id> bNNNN-bMMMM`.
-- **Context tạm:** `context/proposals/<b>.md` của các batch trước đang `PENDING_USER_APPROVAL` được đưa cho translator và literary-editor để giữ nhất quán. Đây không phải context đã duyệt (bất biến 10 vẫn giữ); ưu tiên: context đã duyệt > quyết định của người dùng > đề xuất chưa duyệt.
+- **Context tạm:** `context/proposals/<b>.md` của các batch trước đang `PENDING_USER_APPROVAL` được đưa cho translator và literary-editor để giữ nhất quán. Đây không phải context đã duyệt (bất biến 10 vẫn giữ); ưu tiên: context (gồm `decisions.md`) > đề xuất chưa duyệt.
+- **Quyết định của người dùng** (trả lời câu hỏi, ghi chú rework mang tính quy ước) được ghi thẳng vào `context/` ngay khi trả lời và tăng `context.version`; chương đã dịch bị ảnh hưởng được cập nhật bằng `sync`, không dịch lại.
+- Batch `PENDING_USER_APPROVAL` không chặn dịch tiếp; người dùng duyệt gộp theo chặng. Finalize chỉ dùng chương `APPROVED`.
 
 ## 2. Định dạng file chương
 
@@ -73,9 +80,9 @@ books/<book-id>/
 5. Hoàn tất hoặc đánh dấu rõ bị gián đoạn ở bước hiện tại rồi mới sang bước kế.
 6. Resume chỉ bỏ qua artifact có fingerprint khớp (mục 5). Không có fingerprint thì phải kiểm tra, không bỏ qua mù quáng.
 7. EPUB chỉ chứa các file truyện đúng thứ tự, đúng version được duyệt; không bao giờ chứa notes, prompt, report hay context.
-8. Không ghi đè hàng loạt; mỗi lần sửa tạo version mới; ghi file tạm rồi đổi tên khi có thể. Khi batch được người dùng `approve`, các version khác `approved_version` được chuyển sang `translated/.history/` (lưu trữ, không xóa); trước khi approve, mọi version giữ trong `translated/` để người dùng so bản nháp với bản sau biên tập. Version hỏng hoặc dở dang chuyển sang `.history/` với hậu tố `.partial`, `.invalid`, `.broken`, `.redraft-source` (không xóa).
+8. Không ghi đè hàng loạt; mỗi lần sửa tạo version mới; ghi file tạm rồi đổi tên khi có thể. Sau mỗi lượt biên tập đã qua edit-check, `novel tidy` chuyển version trung gian sang `translated/.history/`; trong `translated/` chỉ còn `v1` (bản nháp, để so), `current_version` và `approved_version`. Khi batch được `approve`, các version khác `approved_version` được chuyển sang `.history/` (lưu trữ, không xóa). Version hỏng hoặc dở dang chuyển sang `.history/` với hậu tố `.partial`, `.invalid`, `.broken`, `.redraft-source` (không xóa).
 9. Không có thao tác Git trong workflow.
-10. Context đã duyệt chỉ đổi khi người dùng duyệt đề xuất (`approve-context` hoặc `approve` batch).
+10. Context chỉ đổi theo người dùng: `approve-context`, `approve` batch (gộp đề xuất ACCEPT), hoặc khi người dùng trả lời câu hỏi / ra quyết định (ghi vào `decisions.md` và file context liên quan). Agent không tự đổi context.
 
 ## 4. Trạng thái
 
@@ -96,7 +103,9 @@ Schema: `templates/status.example.json`. Quy tắc ghi `status.json`:
 
 - `raw_hash` = `content_hash` trong frontmatter của raw (crawler tính). Nếu thiếu: `shasum -a 256 raw/chapter-NNNN.md`.
 - `context_version` = `status.json → context.version` (số nguyên, tăng mỗi lần duyệt context).
-- Một bản dịch là **hiện hành** khi `raw_hash` và `context_version` lưu trong chương bằng giá trị hiện tại. Khác thì chương là **STALE**: báo cho người dùng, **không** tự dịch lại.
+- Một bản dịch là **hiện hành** khi `raw_hash` và `context_version` lưu trong chương bằng giá trị hiện tại.
+  - `raw_hash` khác: chương **STALE**, báo người dùng, **không** tự dịch lại.
+  - Chỉ `context_version` nhỏ hơn: chương **cần sync** (áp các mục `U` mới hơn trong `decisions.md` bằng `/novel-translate sync`), không dịch lại.
 
 ## 6. Kiểm tra nhanh bằng shell (không cần code mới)
 
@@ -107,6 +116,8 @@ Schema: `templates/status.example.json`. Quy tắc ghi `status.json`:
 | Ghi chú lọt vào truyện | `grep -nE '^(---|\*\*\*)$\|\[(Chú thích\|Thuật ngữ mới\|Cần xác nhận)' <bản dịch>` | chỉ còn dòng ngắt cảnh có trong nguyên tác |
 | Tiêu đề | dòng 1 bắt đầu bằng `# ` | đúng |
 | Hash raw không đổi | so `content_hash` với `status.json` | bằng nhau |
+| Biến thể cấm | `npm run -s novel -- term-scan books/<id> [--from N --to M]` (đọc cột `Cấm (scan)` của các bảng trong `context/*.md`, trừ proposals; tìm trong `current_version`) | mã 0; mã 2 = có ứng viên, Editor xét ở `sync` |
+| Dọn version | `npm run -s novel -- tidy books/<id> [--chapters …]` | chỉ chạy sau edit-check PASS |
 
 **Sau mỗi lần gọi literary-editor:** `npm run -s novel -- edit-check books/<id> --batch <b> --report <reviews/...md>` (mã 0 = PASS, 2 = FAIL). Lệnh kiểm:
 - hash của raw, mọi version cũ, `context/**`, summaries và notes không đổi;
@@ -118,7 +129,7 @@ Cảnh báo (`WARN`, không chặn) khi:
 - sửa trên 30% số đoạn mà không ghi `REDRAFT`;
 - change ID trỏ tới đoạn không đổi.
 
-**Sau mỗi lần gọi agent:** `npm run -s novel -- agent-check books/<id> --agent <id> [--model opus|sonnet]` kiểm model thật và việc agent chạy foreground.
+**Sau mỗi lần gọi agent:** `npm run -s novel -- agent-check books/<id> --agent <id> [--model opus|sonnet]` kiểm model thật và cách chạy. Mã 2 khi sai model, hoặc chạy nền mà chưa xác nhận đã xong (`meta.json → finished`, hoặc lượt cuối là `SubagentHandback` / `end_turn`). Chạy nền nhưng đã xong: `WARN`, mã 0.
 
 ## 7. Chính sách sửa (literary-editor; chi tiết: `prompts/literary-editor-master.md` §6)
 

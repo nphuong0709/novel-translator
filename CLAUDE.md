@@ -15,14 +15,14 @@ Thiết kế: `docs/novel_translation_framework_blueprint_simplified.md` (thay p
 ## Workflow dịch (skills)
 - Chỉ ba skill chính, **do người dùng gọi**: `/novel-crawl`, `/novel-translate`, `/novel-finalize`. Không bao giờ tự nối chúng với nhau.
 - Hai subagent (blueprint D-16):
-  - `translator`: Sonnet; dịch bản nháp. Riêng `CONTEXT_INIT` gọi bằng Opus.
+  - `translator`: Opus; dựng context (`CONTEXT_INIT`) và dịch bản nháp (đổi từ Sonnet ngày 2026-11-05).
   - `literary-editor`: Opus; độc lập với `translator`, review và sửa cục bộ có căn cứ trên bản sao. Không bao giờ sửa raw, bản nháp v1, context đã duyệt; `novel edit-check` kiểm bằng hash.
-  - Phiên main điều phối. Chỉ gọi agent ở **foreground** (`run_in_background: false`), chờ xong mới sang bước sau, rồi chạy `novel agent-check`. Subagent không được gọi subagent khác.
-  - `critic` (chỉ đọc) là agent **tạm** cho pilot T5, không thuộc workflow; xóa sau pilot.
+  - Phiên main điều phối. Gọi agent ở **foreground** (`run_in_background: false`) khi có thể, chờ xong mới sang bước sau, rồi chạy `novel agent-check`. Bị chạy nền nhưng đã xong thì `agent-check` chỉ cảnh báo; sai model hoặc chưa xong thì chặn. Subagent không được gọi subagent khác.
 - **Không có thao tác Git trong workflow dữ liệu:** không commit, stage, push hay sửa `.gitignore` như một bước của workflow.
 - Chỉ file local: không UI, DB, chi tiêu API key, upload cloud hay chạy nền ngầm.
 - Giữ nguyên nguồn. Bản dịch, review, context và ấn phẩm là các file tách biệt (`rules/artifact-contract.md`).
-- Kết luận và bản sửa của Editor **không phải** phê duyệt của người dùng. Không gọi lại translator để sửa lỗi cục bộ mà Editor sửa được. Batch tối đa 3 chương. Mặc định dừng sau mỗi batch; chỉ khi người dùng gõ `--auto` mới chạy liền nhiều batch (vẫn không tự duyệt). Chỉ đặt `APPROVED` khi người dùng gõ lệnh `approve`.
+- Kết luận và bản sửa của Editor **không phải** phê duyệt của người dùng. Không gọi lại translator để sửa lỗi cục bộ mà Editor sửa được. Batch tối đa 3 chương. Mặc định dừng sau mỗi batch; chỉ khi người dùng gõ `--auto` mới chạy liền nhiều batch (vẫn không tự duyệt). Batch đang chờ duyệt **không** chặn dịch tiếp; người dùng duyệt gộp theo chặng. Chỉ đặt `APPROVED` khi người dùng gõ lệnh `approve`.
+- Câu hỏi cho người dùng gom về `reviews/questions.md`, hỏi gộp. Câu trả lời (quyết định) ghi thẳng vào `context/decisions.md` + file context liên quan, tăng `context.version`, rồi `/novel-translate sync` áp lên chương đã dịch. Không rework từng batch cho cùng một quyết định.
 - Không bao giờ đưa bình luận, ghi chú, bảng QA hay report vào file truyện hoặc EPUB.
 - Không tự rút gọn hay thay thế các master prompt khi gọi agent.
 - Thiếu script hoặc lệnh cần thiết: báo `NOT_IMPLEMENTED`, không giả vờ đã xong.
@@ -30,7 +30,7 @@ Thiết kế: `docs/novel_translation_framework_blueprint_simplified.md` (thay p
 ## Nguồn sự thật
 - Workflow: `.claude/skills/{novel-crawl,novel-translate,novel-finalize}/SKILL.md`
 - Translator: `prompts/translation-master.md` (tầng 1, luật chung mọi thể loại), `prompts/modules/<genre>.md` (tầng 2, nạp theo `book.yaml → genre`), `prompts/translation-workflow.md`, `prompts/vietnamese-style.md`. Context của truyện là tầng 3 (master §12). Phần riêng thể loại viết vào module, không viết vào master.
-- Literary Editor: `prompts/literary-editor-master.md`, `prompts/translation-master.md`, `prompts/vietnamese-style.md`, module. (Pilot: `critic` dùng `prompts/critic-master.md`.)
+- Literary Editor: `prompts/literary-editor-master.md`, `prompts/translation-master.md`, `prompts/vietnamese-style.md`, module. Prompt Critic cũ lưu ở `docs/archive/critic-master.md` (chỉ để đọc report `critic-batch.md` của batch cũ).
 - Artifact, trạng thái, kiểm tra: `rules/artifact-contract.md`, `templates/status.example.json`; EPUB: `rules/epub-export.md`
 
 ## Lệnh phát triển
@@ -38,13 +38,14 @@ Thiết kế: `docs/novel_translation_framework_blueprint_simplified.md` (thay p
 npm test            # toàn bộ test
 npm run test:golden # chỉ golden test (port từ V1)
 npm run typecheck
-npm run novel -- <lệnh>   # CLI qua tsx: init | ingest | import | status | crosscheck | save-report | edit-prep | edit-check | agent-check (help để xem cú pháp)
+npm run novel -- <lệnh>   # CLI qua tsx: init | ingest | import | status | crosscheck | save-report | edit-prep | edit-check | agent-check | tidy | term-scan (help để xem cú pháp)
 ```
 
 ## Trạng thái
 - Slice 1 (crawler TS) xong; layout skill (`raw/chapter-NNNN.md`, `manifest.json`, `reviews/ingestion.md`) xong. KZGD ở `books/kzgd/`.
 - Đã chạy b0001–b0003 (ch1–8) theo mô hình Critic cũ, đang chờ duyệt.
-- Slice T5 (Translator Sonnet → Literary Editor Opus, D-16) đã cài prompt, agent, skill, contract và `novel edit-prep | edit-check | agent-check`. Tiếp theo: pilot theo `docs/pilot-t5.md`.
+- Slice T5 (Translator → Literary Editor Opus, D-16; Translator đổi từ Sonnet sang Opus ngày 2026-11-05) đã cài prompt, agent, skill, contract và `novel edit-prep | edit-check | agent-check`. Pilot T5 bỏ (2026-11-05, không đo tiếp); dùng thẳng mô hình này.
+- Đơn giản hóa duyệt (2026-11-05, người dùng đồng ý A–E): quyết định hiệu lực ngay (`decisions.md`), hàng đợi `questions.md`, lệnh `sync` + `edit-prep --next`/`--batch sync`, batch chờ duyệt không chặn, `tidy` + report rework một file (`# Vòng N`). KZGD: b0001–b0003 (ch1–8) đã rework đồng bộ U4–U18, chờ duyệt gộp; tiếp theo dịch ch9+.
 - Còn tồn tại từ thiết kế cũ, chưa dùng trong workflow: `src/snapshot.ts` (git bundle; sẽ thay bằng backup zip ở T4).
 
 Bản đồ code:

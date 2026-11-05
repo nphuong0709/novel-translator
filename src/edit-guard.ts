@@ -11,7 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, readdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { writeFileAtomic } from "./ingest/core/fs-atomic.js";
 
@@ -21,13 +21,23 @@ export class EditGuardError extends Error {
 
 export const GUARD_FILE = "edit-guard.json";
 const VERSION = /^v\d+$/;
-const BATCH = /^b\d{4}$|^final$/;
+const BATCH = /^b\d{4}$|^final$|^sync$/;
+
+/** Một chương trong lượt biên tập: version nguồn → version đích (mỗi chương có thể khác nhau). */
+export interface GuardItem {
+  chapter: number;
+  from: string;
+  to: string;
+}
 
 export interface EditGuard {
   batch: string;
+  /** version nguồn/đích chung; "mixed" khi các chương khác nhau (xem `items`) */
   from: string;
   to: string;
   chapters: number[];
+  /** có từ khi hỗ trợ version theo từng chương; guard cũ không có trường này */
+  items?: GuardItem[];
   created_at: string;
   /** đường dẫn tương đối trong book-dir → sha256 */
   hashes: Record<string, string>;
@@ -111,49 +121,102 @@ async function listMd(dir: string): Promise<string[]> {
 }
 
 /** Các file Editor không được đổi, tương đối với book-dir. */
-async function protectedFiles(bookDir: string, batch: string, chapters: number[], to: string): Promise<string[]> {
+async function protectedFiles(bookDir: string, batch: string, items: GuardItem[]): Promise<string[]> {
   const files = new Set<string>();
   const tdir = join(bookDir, "translated");
   const translated = existsSync(tdir) ? await readdir(tdir) : [];
-  for (const n of chapters) {
+  for (const { chapter: n, to } of items) {
     files.add(`raw/chapter-${pad4(n)}.md`);
     for (const f of translated) {
       if (f.startsWith(`chapter-${pad4(n)}.`) && f.endsWith(".md") && f !== `chapter-${pad4(n)}.${to}.md`) files.add(`translated/${f}`);
     }
   }
   for (const p of await listMd(join(bookDir, "context"))) files.add(relative(bookDir, p));
-  for (const f of ["summaries.md", "notes.md"]) files.add(`reviews/${batch}/${f}`);
+  // lượt sync chạm nhiều batch: bảo vệ summaries/notes của mọi batch
+  const batches = batch === "sync" && existsSync(join(bookDir, "reviews")) ? (await readdir(join(bookDir, "reviews"))).filter((b) => /^b\d{4}$/.test(b)) : [batch];
+  for (const b of batches) for (const f of ["summaries.md", "notes.md"]) files.add(`reviews/${b}/${f}`);
   return [...files].filter((f) => existsSync(join(bookDir, f))).sort();
+}
+
+const VERSION_IN_NAME = /^chapter-(\d{4})\.v(\d+)\.md/;
+
+/** Version kế tiếp còn trống của một chương: lớn nhất trong translated/ và translated/.history/ cộng 1. */
+export async function nextVersion(bookDir: string, chapter: number): Promise<string> {
+  let max = 0;
+  for (const d of ["translated", "translated/.history"]) {
+    const dir = join(bookDir, d);
+    if (!existsSync(dir)) continue;
+    for (const f of await readdir(dir)) {
+      const m = VERSION_IN_NAME.exec(f);
+      if (m && Number(m[1]) === chapter) max = Math.max(max, Number(m[2]));
+    }
+  }
+  return `v${max + 1}`;
+}
+
+interface StatusLike {
+  chapters?: Record<string, { current_version?: string | null; approved_version?: string | null }>;
+}
+
+async function readStatus(bookDir: string): Promise<StatusLike> {
+  const p = join(bookDir, "status.json");
+  if (!existsSync(p)) throw new EditGuardError("Không có status.json");
+  return JSON.parse(await readFile(p, "utf8")) as StatusLike;
+}
+
+/** Đọc `current_version` của từng chương trong status.json. */
+export async function currentVersions(bookDir: string, chapters: number[]): Promise<Map<number, string>> {
+  const st = await readStatus(bookDir);
+  const out = new Map<number, string>();
+  for (const n of chapters) {
+    const v = st.chapters?.[pad4(n)]?.current_version;
+    if (!v || !VERSION.test(v)) throw new EditGuardError(`ch${pad4(n)}: status.json chưa có current_version`);
+    out.set(n, v);
+  }
+  return out;
 }
 
 export interface PrepareOptions {
   batch: string;
   chapters: number[];
-  from: string;
-  to: string;
+  /** cùng version cho mọi chương; bỏ trống khi dùng `next` */
+  from?: string | undefined;
+  to?: string | undefined;
+  /** mỗi chương: nguồn = current_version (status.json), đích = version kế tiếp còn trống */
+  next?: boolean;
   now?: Date;
 }
 
 export async function prepareEdit(bookDir: string, o: PrepareOptions): Promise<EditGuard> {
   if (!BATCH.test(o.batch)) throw new EditGuardError(`--batch không hợp lệ: ${o.batch}`);
-  if (!VERSION.test(o.from) || !VERSION.test(o.to) || o.from === o.to) throw new EditGuardError("--from/--to phải dạng vN và khác nhau");
   if (o.chapters.length === 0) throw new EditGuardError("Thiếu --chapters");
-  for (const n of o.chapters) {
-    const src = join(bookDir, chapterFile(n, o.from));
-    const dst = join(bookDir, chapterFile(n, o.to));
-    if (!existsSync(src)) throw new EditGuardError(`Không có ${chapterFile(n, o.from)}`);
-    if (existsSync(dst)) {
-      throw new EditGuardError(`${chapterFile(n, o.to)} đã tồn tại. Nếu là bản sửa dở, chuyển nó vào translated/.history/ (hậu tố .partial) rồi chạy lại.`);
+  const chapters = [...o.chapters].sort((a, b) => a - b);
+  let items: GuardItem[];
+  if (o.next) {
+    if (o.from || o.to) throw new EditGuardError("Dùng --next hoặc --from/--to, không dùng cả hai");
+    const cur = await currentVersions(bookDir, chapters);
+    items = [];
+    for (const n of chapters) items.push({ chapter: n, from: cur.get(n) ?? "", to: await nextVersion(bookDir, n) });
+  } else {
+    if (!o.from || !o.to || !VERSION.test(o.from) || !VERSION.test(o.to) || o.from === o.to) throw new EditGuardError("--from/--to phải dạng vN và khác nhau (hoặc dùng --next)");
+    items = chapters.map((n) => ({ chapter: n, from: o.from as string, to: o.to as string }));
+  }
+  for (const { chapter: n, from, to } of items) {
+    if (!existsSync(join(bookDir, chapterFile(n, from)))) throw new EditGuardError(`Không có ${chapterFile(n, from)}`);
+    if (existsSync(join(bookDir, chapterFile(n, to)))) {
+      throw new EditGuardError(`${chapterFile(n, to)} đã tồn tại. Nếu là bản sửa dở, chuyển nó vào translated/.history/ (hậu tố .partial) rồi chạy lại.`);
     }
   }
-  for (const n of o.chapters) await copyFile(join(bookDir, chapterFile(n, o.from)), join(bookDir, chapterFile(n, o.to)));
+  for (const { chapter: n, from, to } of items) await copyFile(join(bookDir, chapterFile(n, from)), join(bookDir, chapterFile(n, to)));
   const hashes: Record<string, string> = {};
-  for (const f of await protectedFiles(bookDir, o.batch, o.chapters, o.to)) hashes[f] = sha256(await readFile(join(bookDir, f)));
+  for (const f of await protectedFiles(bookDir, o.batch, items)) hashes[f] = sha256(await readFile(join(bookDir, f)));
+  const same = (k: "from" | "to") => (items.every((i) => i[k] === items[0]?.[k]) ? (items[0]?.[k] ?? "") : "mixed");
   const guard: EditGuard = {
     batch: o.batch,
-    from: o.from,
-    to: o.to,
-    chapters: [...o.chapters].sort((a, b) => a - b),
+    from: same("from"),
+    to: same("to"),
+    chapters,
+    items,
     created_at: (o.now ?? new Date()).toISOString(),
     hashes,
   };
@@ -184,6 +247,21 @@ const NOTE_MARKER = /\[(Chú thích|Thuật ngữ mới|Cần xác nhận)/;
 const RULE_LINE = /^(---|\*\*\*)$/;
 const HAN = /\p{Script=Han}/u;
 
+/** Guard cũ (không có `items`) dùng chung from/to cho mọi chương. */
+export function guardItems(g: EditGuard): GuardItem[] {
+  return g.items && g.items.length ? g.items : g.chapters.map((n) => ({ chapter: n, from: g.from, to: g.to }));
+}
+
+/**
+ * Report nhiều vòng: các vòng sau được ghi nối vào cùng file dưới tiêu đề `# Vòng N`.
+ * edit-check chỉ xét vòng cuối. Report không có `# Vòng` thì xét cả file.
+ */
+export function currentRound(report: string): string {
+  const marks = [...report.matchAll(/^# Vòng \d+[^\n]*$/gm)];
+  const last = marks[marks.length - 1];
+  return last?.index === undefined ? report : report.slice(last.index + last[0].length);
+}
+
 export async function checkEdit(bookDir: string, batch: string, reportRel: string): Promise<CheckResult> {
   const guardPath = join(bookDir, "reviews", batch, GUARD_FILE);
   if (!existsSync(guardPath)) throw new EditGuardError(`Không có ${relative(bookDir, guardPath)}; chạy edit-prep trước`);
@@ -198,7 +276,8 @@ export async function checkEdit(bookDir: string, batch: string, reportRel: strin
   }
 
   const reportPath = join(bookDir, reportRel);
-  const report = existsSync(reportPath) ? await readFile(reportPath, "utf8") : null;
+  const fullReport = existsSync(reportPath) ? await readFile(reportPath, "utf8") : null;
+  const report = fullReport === null ? null : currentRound(fullReport);
   if (report === null) fails.push(`thiếu report ${reportRel}`);
   else for (const [re, name] of REQUIRED_SECTIONS) if (!re.test(report)) fails.push(`report thiếu ${name}`);
   const { entries, problems } = report ? parseChangeLog(report) : { entries: [], problems: [] };
@@ -207,15 +286,16 @@ export async function checkEdit(bookDir: string, batch: string, reportRel: strin
   for (const e of entries) if (!guard.chapters.includes(e.chapter)) fails.push(`change log trỏ tới chương ngoài phạm vi: ${e.id} (ch${e.chapter})`);
 
   const chapters: ChapterResult[] = [];
-  for (const n of guard.chapters) {
+  const items = guardItems(guard);
+  for (const { chapter: n, from, to } of items) {
     const tag = `ch${pad4(n)}`;
-    const target = join(bookDir, chapterFile(n, guard.to));
+    const target = join(bookDir, chapterFile(n, to));
     if (!existsSync(target)) {
-      fails.push(`${tag}: thiếu ${chapterFile(n, guard.to)}`);
+      fails.push(`${tag}: thiếu ${chapterFile(n, to)}`);
       continue;
     }
     const raw = await readFile(join(bookDir, `raw/chapter-${pad4(n)}.md`), "utf8");
-    const before = await readFile(join(bookDir, chapterFile(n, guard.from)), "utf8");
+    const before = await readFile(join(bookDir, chapterFile(n, from)), "utf8");
     const after = await readFile(target, "utf8");
     const changed = changedParagraphs(before, after);
     const mine = entries.filter((e) => e.chapter === n);
@@ -228,7 +308,7 @@ export async function checkEdit(bookDir: string, batch: string, reportRel: strin
     chapters.push({ chapter: n, redraft: redraft.has(n), paragraphs: { raw: rawCount, target: targetCount }, changed, logged, unlogged, staleLog, changedRatio: ratio });
 
     if (redraft.has(n)) {
-      warns.push(`${tag}: Editor ghi REDRAFT; ${chapterFile(n, guard.to)} không được dùng làm version hiện hành`);
+      warns.push(`${tag}: Editor ghi REDRAFT; ${chapterFile(n, to)} không được dùng làm version hiện hành`);
       continue;
     }
     if (!after.startsWith("# ")) fails.push(`${tag}: dòng 1 không phải tiêu đề "# …"`);
@@ -248,6 +328,124 @@ export async function checkEdit(bookDir: string, batch: string, reportRel: strin
   return { ok: fails.length === 0, fails, warns, chapters };
 }
 
+// ---------------------------------------------------------------- tidy (dọn version trung gian)
+
+export interface TidyMove {
+  from: string;
+  to: string;
+}
+
+/**
+ * Chuyển các version trung gian vào translated/.history/. Giữ lại: v1 (bản nháp),
+ * current_version và approved_version của từng chương (theo status.json). Không xóa file nào.
+ * Chỉ chạy sau khi edit-check PASS (guard đang mở sẽ báo file được bảo vệ đã mất).
+ */
+export async function tidyVersions(bookDir: string, chapters?: number[]): Promise<TidyMove[]> {
+  const st = await readStatus(bookDir);
+  const tdir = join(bookDir, "translated");
+  if (!existsSync(tdir)) return [];
+  const hdir = join(tdir, ".history");
+  const moves: TidyMove[] = [];
+  for (const f of (await readdir(tdir)).sort()) {
+    const m = /^chapter-(\d{4})\.(v\d+)\.md$/.exec(f);
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (chapters && !chapters.includes(n)) continue;
+    const ch = st.chapters?.[m[1] ?? ""];
+    if (!ch?.current_version) continue; // chương chưa ghi status: không đụng
+    const keep = new Set(["v1", ch.current_version, ch.approved_version].filter((x): x is string => !!x));
+    if (keep.has(m[2] ?? "")) continue;
+    await mkdir(hdir, { recursive: true });
+    let dest = join(hdir, f);
+    for (let i = 2; existsSync(dest); i++) dest = join(hdir, `${f}.${i}`);
+    await rename(join(tdir, f), dest);
+    moves.push({ from: relative(bookDir, join(tdir, f)), to: relative(bookDir, dest) });
+  }
+  return moves;
+}
+
+// ---------------------------------------------------------------- term-scan (biến thể cấm)
+
+export interface ForbiddenTerm {
+  term: string;
+  /** cách dịch đúng (cột thứ hai của dòng glossary) */
+  canonical: string;
+  source: string;
+}
+
+export interface TermHit extends ForbiddenTerm {
+  chapter: number;
+  version: string;
+  line: number;
+}
+
+const splitRow = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+const EMPTY_CELL = /^(—|-|–|không|không có|\(trống\))?$/i;
+
+/**
+ * Đọc các bảng Markdown trong context/*.md có cột tiêu đề `Cấm (scan)`: từ cấm ở MỌI ngữ cảnh
+ * (thường là từ vùng miền đã chốt). Cột "Biến thể cấm" thường của glossary phụ thuộc ngữ cảnh
+ * (vd. "tang thi" chỉ sai khi nguồn là 僵尸) nên không quét.
+ * Cách dịch đúng: cột có tiêu đề bắt đầu bằng "Đúng"/"Dùng", nếu không có thì cột 2.
+ */
+export function parseForbiddenTerms(md: string, source: string): ForbiddenTerm[] {
+  const out: ForbiddenTerm[] = [];
+  let col = -1;
+  let canonCol = 1;
+  for (const line of md.split("\n")) {
+    if (!line.trim().startsWith("|")) {
+      col = -1;
+      continue;
+    }
+    const cells = splitRow(line);
+    if (cells.every((c) => /^:?-{2,}:?$/.test(c))) continue;
+    const idx = cells.findIndex((c) => /cấm\s*\(scan\)/i.test(c));
+    if (idx >= 0 && col < 0) {
+      col = idx;
+      const c = cells.findIndex((h) => /^(đúng|dùng)/i.test(h));
+      canonCol = c >= 0 ? c : 1;
+      continue;
+    }
+    if (col < 0) continue;
+    const cell = cells[col] ?? "";
+    if (EMPTY_CELL.test(cell)) continue;
+    const canonical = (cells[canonCol] ?? "").replace(/\*\*/g, "");
+    for (let t of cell.split(/[,;/]|\s+hoặc\s+/)) {
+      t = t.replace(/\*\*|`|["“”«»]/g, "").replace(/\(.*?\)/g, "").trim();
+      if (t.length >= 2 && !EMPTY_CELL.test(t)) out.push({ term: t, canonical, source });
+    }
+  }
+  return out;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Tìm biến thể cấm trong current_version của các chương (đã dịch). Kết quả là ứng viên để Editor xét. */
+export async function scanTerms(bookDir: string, range?: { from: number; to: number }): Promise<{ terms: ForbiddenTerm[]; hits: TermHit[] }> {
+  const st = await readStatus(bookDir);
+  const terms: ForbiddenTerm[] = [];
+  for (const p of await listMd(join(bookDir, "context"))) {
+    const rel = relative(bookDir, p);
+    if (rel.startsWith("context/proposals")) continue;
+    terms.push(...parseForbiddenTerms(await readFile(p, "utf8"), rel));
+  }
+  const res = terms.map((t) => ({ t, re: new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(t.term)}(?![\\p{L}\\p{N}])`, "iu") }));
+  const hits: TermHit[] = [];
+  for (const [key, ch] of Object.entries(st.chapters ?? {}).sort()) {
+    const n = Number(key);
+    if (range && (n < range.from || n > range.to)) continue;
+    const v = ch.current_version;
+    if (!v) continue;
+    const p = join(bookDir, chapterFile(n, v));
+    if (!existsSync(p)) continue;
+    const lines = (await readFile(p, "utf8")).split("\n");
+    lines.forEach((l, i) => {
+      for (const { t, re } of res) if (re.test(l)) hits.push({ ...t, chapter: n, version: v, line: i + 1 });
+    });
+  }
+  return { terms, hits };
+}
+
 /** Tóm tắt một agent từ transcript + meta.json: model thật và cách chạy (foreground/background). */
 export interface AgentUsage {
   calls: number;
@@ -262,6 +460,11 @@ export interface AgentInfo {
   agentType: string | null;
   requestShape: string | null;
   models: string[];
+  /**
+   * Agent đã chạy xong chưa: `meta.json → finished` nếu có; không có thì true khi lượt assistant cuối
+   * là `SubagentHandback` hoặc `stop_reason = end_turn`; không xác định được thì null.
+   */
+  finished: boolean | null;
   /** cộng theo message.id (một message có thể ghi nhiều dòng trong transcript) */
   usage: AgentUsage;
 }
@@ -271,11 +474,17 @@ export function parseAgentInfo(jsonl: string, metaJson: string | null): AgentInf
   const seen = new Set<string>();
   const usage: AgentUsage = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, thinking: 0 };
   const num = (x: unknown) => (typeof x === "number" ? x : 0);
+  let lastEnded = false;
   for (const line of jsonl.split("\n")) {
     if (!line.trim()) continue;
     try {
-      const d = JSON.parse(line) as { type?: string; message?: { id?: unknown; model?: unknown; usage?: Record<string, unknown> } };
+      const d = JSON.parse(line) as {
+        type?: string;
+        message?: { id?: unknown; model?: unknown; stop_reason?: unknown; content?: unknown; usage?: Record<string, unknown> };
+      };
       if (d.type !== "assistant" || !d.message) continue;
+      const content = Array.isArray(d.message.content) ? (d.message.content as Array<{ type?: unknown; name?: unknown }>) : [];
+      lastEnded = d.message.stop_reason === "end_turn" || content.some((c) => c.type === "tool_use" && c.name === "SubagentHandback");
       if (typeof d.message.model === "string") models.add(d.message.model);
       const id = typeof d.message.id === "string" ? d.message.id : null;
       const u = d.message.usage;
@@ -298,5 +507,6 @@ export function parseAgentInfo(jsonl: string, metaJson: string | null): AgentInf
     meta = {};
   }
   const s = (k: string) => (typeof meta[k] === "string" ? (meta[k] as string) : null);
-  return { agentType: s("agentType"), requestShape: s("requestShape"), models: [...models].sort(), usage };
+  const finished = typeof meta["finished"] === "boolean" ? (meta["finished"] as boolean) : lastEnded ? true : null;
+  return { agentType: s("agentType"), requestShape: s("requestShape"), models: [...models].sort(), finished, usage };
 }

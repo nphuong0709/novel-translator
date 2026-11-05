@@ -29,7 +29,7 @@ Tham số người dùng: `$ARGUMENTS`
    - mọi `reviews/b*/editor-batch.md` (batch cũ: `critic-batch.md`);
    - các `open_issues` còn lại;
    - danh sách file `approved_version`.
-   Đích report `reviews/final/editor-final.md`. Sau khi gọi, chạy `npm run -s novel -- agent-check books/<id> --agent <agentId> --model opus`.
+   Đích report `reviews/final/editor-final.md`. Sau khi gọi, chạy `npm run -s novel -- agent-check books/<id> --agent <agentId> --model opus`. Mã 0 có `WARN: chạy nền nhưng đã xong` là hợp lệ (ghi vào báo cáo); mã 2 (sai model, hoặc chạy nền chưa xác nhận đã xong) xử lý như mục "Gọi agent" của `/novel-translate`. Bị chạy nền thì chờ thông báo hoàn tất rồi mới chạy `agent-check`.
 2. **Đoạn mẫu do main chọn**, chỉ đường dẫn và số đoạn:
    - lần đầu xuất hiện mỗi nhân vật chính;
    - các chương có đổi xưng hô theo `relationships.md`;

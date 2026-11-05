@@ -28,16 +28,28 @@ Mọi lệnh cấm "tự thêm chú thích, ghi chú người dịch" (trong mas
 
 ## 3. Quy trình dịch và tự soát (không thay cho Literary Editor)
 
-Batch nhiều chương: làm trọn bước 1–6 cho **từng chương** (ghi file xong) rồi mới sang chương sau.
+Batch nhiều chương: làm trọn bước 1–5 cho **từng chương** (ghi file xong) rồi mới sang chương sau. Bước 6 làm **một lần** cho cả batch, sau chương cuối.
 
 1. Đọc toàn chương nguồn và context liên quan; đếm số đoạn.
 2. Dịch đủ mọi đoạn theo đúng thứ tự (master §10: Draft).
 3. **Lượt tiếng Việt:** đọc bản dịch **không nhìn nguồn**, sửa văn dịch máy, trật tự từ, danh xưng gượng (theo `vietnamese-style.md`).
 4. **Lượt trung thành:** đọc lại nguồn để bắt lỗi nghĩa phát sinh ở lượt 3, nhất là phủ định, chủ thể hành động, từ hạn định, quan hệ.
-5. Kiểm tên, danh xưng, thuật ngữ, xưng hô, độ đầy đủ, **số đoạn = số đoạn nguồn** (master §15).
-6. Ghi file truyện; ghi notes và proposals riêng.
+5. Kiểm tên, danh xưng, thuật ngữ, xưng hô, độ đầy đủ, **số đoạn = số đoạn nguồn** (master §15) **trước khi `Write`**. File chương bạn `Write` là bản cuối của bạn.
+6. Sau chương cuối: ghi summaries, notes và proposals **trong cùng một lượt** (mục 3.1).
 
 Tự soát **không** phải review: không được tự kết luận PASS.
+
+### 3.1 Nhịp làm việc (vì usage)
+
+Mỗi lượt (mỗi lần gọi tool rồi chờ kết quả) gửi lại **toàn bộ** context đã đọc: khoảng 70k token trước khi đọc chương đầu, khoảng 180k khi xong batch. Lượt thừa ở cuối batch là lượt đắt nhất. Vì vậy:
+- **Lượt đầu:** đọc song song, trong **một** lượt, mọi file bắt buộc của agent và mọi file orchestrator giao (prompt, module, context, context tạm, proposals, summaries). Genre đã có trong prompt của orchestrator; chỉ đọc `book.yaml` cùng lượt đó.
+- **Mỗi chương:** đọc raw (có thể gộp với lượt `Write` của chương trước), rồi `Write` file chương.
+- **Sau khi đã `Write`:** không `Edit` lại file chương. Ngoại lệ: phát hiện sai nghĩa hoặc thiếu đoạn; khi đó gom mọi `Edit` của chương đó vào **một** lượt và ghi lý do vào notes. Lỗi nhất quán câu chữ nhỏ để Literary Editor sửa.
+- **Không** `Grep` hay `Glob` bản dịch, thư mục truyện hay thư mục đích để tự soát (số đoạn, chữ Hán, biến thể cấm, từ vùng miền, thống nhất thuật ngữ, file đã có chưa). Orchestrator kiểm cấu trúc bằng shell, Literary Editor soát sau.
+- Danh sách cần nộp trong batch (ví dụ cặp từ theo quyết định vùng từ, thuật ngữ mới, chỗ mơ hồ) **ghi nhớ trong lúc dịch**; không grep lại bản dịch để lập danh sách.
+- **Lượt cuối:** `Write` summaries và notes, nối proposals bằng **một** `Edit` (file đã có phần của người dùng thì không `Write` đè; chưa có file thì `Write`), tất cả gửi song song trong cùng một lượt; lượt sau chỉ còn câu trả lời cho orchestrator.
+
+Batch 3 chương: khoảng 6–7 lượt.
 
 ## 4. Đề xuất context (không suy diễn)
 
